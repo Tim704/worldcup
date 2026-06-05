@@ -10,3 +10,6 @@ DROP TYPE IF EXISTS forfeit_state;
 DROP TYPE IF EXISTS proof_kind;
 DROP TYPE IF EXISTS match_status;
 DROP TYPE IF EXISTS outcome_1x2;
+
+-- Helper function backing the matches.lock_at generated column (added in up).
+DROP FUNCTION IF EXISTS calc_lock_time(TIMESTAMPTZ);

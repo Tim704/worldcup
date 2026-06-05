@@ -42,6 +42,31 @@ CREATE TABLE users (
 );
 
 -- ---------------------------------------------------------------------------
+-- Lock-time helper (required by the matches.lock_at GENERATED column below)
+-- ---------------------------------------------------------------------------
+-- WHY this function exists:
+--   A STORED generated column's expression MUST be IMMUTABLE. The naive form
+--   `kickoff_at - INTERVAL '1 minute'` is NOT accepted, because the operator
+--   `timestamptz - interval` is only STABLE: for day/month intervals the result
+--   depends on the session TimeZone (DST shifts), and an operator's volatility
+--   is a fixed property regardless of the literal passed. PostgreSQL therefore
+--   rejects it with "generation expression is not immutable".
+--
+--   Subtracting a fixed 60 SI seconds (1 minute) is, however, genuinely
+--   timezone-independent and deterministic, so wrapping exactly that operation
+--   in an IMMUTABLE SQL function is both correct and safe. The generated column
+--   can then reference this function. Keep the body to the fixed-minute shift
+--   only — do NOT generalise it to arbitrary day/month intervals, or the
+--   IMMUTABLE marking would become a lie.
+CREATE OR REPLACE FUNCTION calc_lock_time(k_time TIMESTAMPTZ)
+RETURNS TIMESTAMPTZ
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT k_time - INTERVAL '1 minute';
+$$;
+
+-- ---------------------------------------------------------------------------
 -- Matches (World Cup 2026 fixtures)
 -- ---------------------------------------------------------------------------
 CREATE TABLE matches (
@@ -54,7 +79,9 @@ CREATE TABLE matches (
     kickoff_at  TIMESTAMPTZ  NOT NULL,
     -- Predictions lock exactly 60 s before kickoff. Encoded at the DB layer so
     -- the rule is identical in Rust, Python and SQL. (t_kickoff − 1 min.)
-    lock_at     TIMESTAMPTZ  GENERATED ALWAYS AS (kickoff_at - INTERVAL '1 minute') STORED,
+    -- Uses the IMMUTABLE calc_lock_time() wrapper above; see its comment for why
+    -- the inline `kickoff_at - INTERVAL '1 minute'` is not STORED-column legal.
+    lock_at     TIMESTAMPTZ  GENERATED ALWAYS AS (calc_lock_time(kickoff_at)) STORED,
     status      match_status NOT NULL DEFAULT 'scheduled',
     home_score  SMALLINT,
     away_score  SMALLINT,
