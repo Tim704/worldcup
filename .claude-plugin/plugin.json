@@ -1,0 +1,6 @@
+{
+  "name": "world-cup-dev-bundle",
+  "version": "1.0.0",
+  "description": "Custom agents and rules for the World Cup prediction web app.",
+  "defaultEnabled": true
+}

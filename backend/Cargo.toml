@@ -1,0 +1,59 @@
+# ============================================================================
+# World Cup 2026 Fantasy Hub — Rust backend crate manifest.
+#
+# Crate name:  worldcup_hub   (library/package identifier, snake_case)
+# Binary name: worldcup-hub   (kebab-case executable, per CONTRACT §2)
+# Edition:     2021
+#
+# Dependency set & versions are pinned EXACTLY per CONTRACT §2. Do not bump.
+#
+# CRITICAL compile constraint (CONTRACT §2): the build environment has NO live
+# database. We therefore use RUNTIME SQLx queries only — `sqlx::query` /
+# `sqlx::query_as::<_, T>("…").bind(…)` against `#[derive(sqlx::FromRow)]`
+# structs. The compile-time-checked `sqlx::query!` / `query_as!` macros are
+# NEVER used (they require DATABASE_URL at build time).
+# ============================================================================
+
+[package]
+name = "worldcup_hub"
+version = "0.1.0"
+edition = "2021"
+description = "World Cup 2026 Fantasy Hub backend (Axum + SQLx → PostgreSQL)"
+
+# The executable target. `cargo run --bin worldcup-hub` / produces `worldcup-hub`.
+[[bin]]
+name = "worldcup-hub"
+path = "src/main.rs"
+
+[dependencies]
+# --- HTTP / async runtime -------------------------------------------------
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+
+# --- Database (runtime queries only; `macros` feature enabled per contract,
+#     but we never invoke the query!/query_as! macros) ----------------------
+sqlx = { version = "0.7", default-features = false, features = [
+    "runtime-tokio-rustls",
+    "postgres",
+    "uuid",
+    "chrono",
+    "macros",
+] }
+
+# --- HTTP middleware (CORS + tracing) -------------------------------------
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# --- Serialization --------------------------------------------------------
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# --- Primitive domain types -----------------------------------------------
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# --- Errors / logging / startup -------------------------------------------
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"            # startup-only (main) error glue
+dotenvy = "0.15"

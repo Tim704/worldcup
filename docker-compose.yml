@@ -1,0 +1,139 @@
+# =============================================================================
+# World Cup 2026 Fantasy Hub — full-stack orchestration (Compose v3).
+#
+# Target host: Raspberry Pi 4/5 (Raspberry Pi OS Lite, arm64). EVERY service
+# pins `platform: linux/arm64`, sets `restart: unless-stopped`, declares a
+# healthcheck (or a health-gated `depends_on`) and a metric memory limit tuned
+# for a constrained single-board computer.
+#
+# Topology (CONTRACT §1):
+#   db (postgres:16-alpine) ← backend (Rust API) , ingest (Python)
+#                              backend ← frontend (nginx SPA + /api proxy)
+#
+# All variables come from CONTRACT §9; see .env.example for safe defaults. Copy
+# it to .env (`cp .env.example .env`) before `docker compose up --build`.
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # db — PostgreSQL 16 (the single source of truth for all services).
+  # ---------------------------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    platform: linux/arm64
+    restart: unless-stopped
+    # Credentials are fixed per the role brief / CONTRACT §9 DATABASE_URL
+    # (postgres://wc:wc@db:5432/worldcup).
+    environment:
+      POSTGRES_USER: wc
+      POSTGRES_PASSWORD: wc
+      POSTGRES_DB: worldcup
+    # Named volume → data survives container recreation (CONTRACT §1).
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    # Gate dependents until Postgres actually accepts connections.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wc -d worldcup"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    # Memory cap (metric): 512 MiB is comfortable for PG on a Pi.
+    mem_limit: 512m
+
+  # ---------------------------------------------------------------------------
+  # backend — Rust API (Axum + SQLx). Builds ./backend.
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+    platform: linux/arm64
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    # Env names are fixed by CONTRACT §9. `${VAR:-default}` lets .env override.
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://wc:wc@db:5432/worldcup}
+      APP_BIND_ADDR: ${APP_BIND_ADDR:-0.0.0.0:8080}
+      RUST_LOG: ${RUST_LOG:-info,worldcup_hub=debug}
+    ports:
+      - "8080:8080"
+    # Probe the API's own health route (CONTRACT §6: GET /api/health). Uses a
+    # tiny inline shell so we need no extra tooling in the slim image.
+    healthcheck:
+      # curl is installed in the backend runtime image; probe the health route
+      # (CONTRACT §6: GET /api/health). A bash-only /dev/tcp probe would fail
+      # under debian-slim's dash, so use curl for a portable check.
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    # Memory cap (metric): 256 MiB is ample for the lean Axum service.
+    mem_limit: 256m
+
+  # ---------------------------------------------------------------------------
+  # ingest — Python fixture ingestion loop. Builds ./scripts. No exposed port.
+  # ---------------------------------------------------------------------------
+  ingest:
+    build:
+      context: ./scripts
+    platform: linux/arm64
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://wc:wc@db:5432/worldcup}
+      INGEST_INTERVAL_SECS: ${INGEST_INTERVAL_SECS:-300}
+      # Optional upstream feed (CONTRACT §9). Empty → script runs in idle/mock.
+      FIXTURE_FEED_URL: ${FIXTURE_FEED_URL:-}
+    # Liveness probe: confirm the long-running Python process is still present.
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f ingest.py > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    # Memory cap (metric): 128 MiB is plenty for the small ingestion worker.
+    mem_limit: 128m
+
+  # ---------------------------------------------------------------------------
+  # frontend — React SPA served by nginx, reverse-proxying /api → backend.
+  #
+  # Build context is the repo ROOT (not ./frontend) so the image can pull in
+  # deploy/nginx/nginx.conf, which lives outside frontend/.
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        # Build-time API base baked into the bundle by Vite (CONTRACT §9).
+        VITE_API_BASE: ${VITE_API_BASE:-http://localhost:8080/api}
+    platform: linux/arm64
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8081:80"
+    # Probe nginx serving the SPA shell on the internal port 80.
+    healthcheck:
+      # nginx:alpine ships BusyBox wget; fetch the SPA shell as a liveness probe
+      # (BusyBox ash has no /dev/tcp, so the previous bash-ism would never run).
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:80/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # Memory cap (metric): 64 MiB is generous for static nginx.
+    mem_limit: 64m
+
+# -----------------------------------------------------------------------------
+# Named volume for durable Postgres storage (CONTRACT §1).
+# -----------------------------------------------------------------------------
+volumes:
+  pgdata:

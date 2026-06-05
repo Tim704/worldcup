@@ -1,0 +1,23 @@
+# =============================================================================
+# World Cup 2026 Fantasy Hub — Python fixture-ingestion dependencies
+# =============================================================================
+# Target runtime: CPython 3.9 on Raspberry Pi OS Lite (arm64).
+#
+# Every pin below ships prebuilt manylinux *aarch64* (arm64) wheels, so the
+# container build needs no C toolchain on the Pi. Versions are pinned exactly
+# (==) for reproducible, deterministic builds across the fleet.
+#
+# Keep this list minimal — the ingestion service only needs to: talk HTTP to an
+# optional upstream feed (requests), speak to PostgreSQL (psycopg2-binary), and
+# read configuration from a .env file (python-dotenv).
+# =============================================================================
+
+# HTTP client used by fetch_fixtures() to pull the optional upstream feed.
+requests==2.31.0
+
+# PostgreSQL driver. The "-binary" distribution bundles libpq and ships arm64
+# (aarch64) wheels, so no system libpq / build step is required on the Pi.
+psycopg2-binary==2.9.9
+
+# Loads DATABASE_URL / FIXTURE_FEED_URL / INGEST_INTERVAL_SECS from a .env file.
+python-dotenv==1.0.1
