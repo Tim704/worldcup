@@ -1,0 +1,30 @@
+{
+  // The Almanac Cup server — TypeScript strict, ES2022, NodeNext (Contract §2).
+  // Compiled output lands in dist/ (consumed by the runtime Docker stage);
+  // sources (including the node:test suites) live under src/.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rootDir": "src",
+    "outDir": "dist",
+
+    // Strictness — the contract demands `strict` on both sides (§10).
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "forceConsistentCasingInFileNames": true,
+
+    // Interop with CJS packages (express, pg, jsonwebtoken, cors).
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+
+    "sourceMap": true,
+    "declaration": false
+  },
+  "include": ["src/**/*.ts"]
+}

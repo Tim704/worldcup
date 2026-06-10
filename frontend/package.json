@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "World Cup 2026 Fantasy Hub — Match Prediction Center (Broadcast Editorial).",
+  "description": "The Almanac Cup — World Cup 2026 prediction hub (Warm Almanac SPA).",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

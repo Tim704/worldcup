@@ -7,14 +7,14 @@
  *
  * The `/// <reference types="vite/client" />` directive pulls in Vite's base
  * `ImportMetaEnv` typing so `import.meta.env` is known to the TypeScript strict
- * checker. We additionally declare our project-specific env var (CONTRACT §9)
+ * checker. We additionally declare our project-specific env var (CONTRACT §8)
  * so `import.meta.env.VITE_API_BASE` is strongly typed wherever it is read
  * (e.g. src/api/client.ts).
  * ----------------------------------------------------------------------------
  */
 
 interface ImportMetaEnv {
-  /** Backend API base path. See CONTRACT §9 — defaults to localhost in dev. */
+  /** API base path. See CONTRACT §8 — defaults to same-origin '/api'. */
   readonly VITE_API_BASE?: string;
 }
 

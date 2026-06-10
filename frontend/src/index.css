@@ -1,4 +1,6 @@
-/* Minimal reset — the component owns all of its own styling. */
+/* Minimal reset — the design system (styles/almanac.css) owns everything else.
+ * NOTE: background-color (longhand) so the layered radial-gradient body wash
+ * declared in almanac.css is never clobbered by a shorthand reset. */
 * { margin: 0; padding: 0; }
-html, body, #root { height: 100%; }
-body { background: #f1ece0; }
+html, body, #root { min-height: 100%; }
+body { background-color: var(--bg); }

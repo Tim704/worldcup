@@ -1,64 +1,77 @@
 /**
  * client.ts
  * ----------------------------------------------------------------------------
- * Thin `fetch` wrapper around the World Cup 2026 Fantasy Hub backend (§6).
+ * Typed `fetch` wrapper around The Almanac Cup API (CONTRACT §6, base `/api`).
  *
- * Design goals:
- *   1. Conform to the exact route paths and request/response shapes in
- *      CONTRACT §6 (base path `/api`).
- *   2. Be resilient with NO backend running: every call first attempts the real
- *      endpoint and, on a *network/transport* failure (backend unreachable),
- *      transparently returns realistic MOCK data so every view renders during
- *      local design work. HTTP-level errors (4xx/5xx) are still surfaced so the
- *      UI can react to e.g. a 409 lock rejection.
+ * Responsibilities:
+ *   1. Resolve the base URL: `import.meta.env.VITE_API_BASE || '/api'`
+ *      ('/api' = same-origin via the nginx proxy in prod / the Vite dev proxy).
+ *   2. Inject `Authorization: Bearer <token>` on every request, reading the
+ *      JWT from localStorage under the fixed key `almanac_token`.
+ *   3. Unwrap the server's error envelope
+ *      `{ "error": { "code": "...", "message": "..." } }`
+ *      into a typed {@link ApiError} so views can branch on `status`/`code`
+ *      (e.g. 409 MATCH_LOCKED, 401 UNAUTHENTICATED).
  *
- * Base URL: `import.meta.env.VITE_API_BASE ?? 'http://localhost:8080/api'`
- * (the `VITE_API_BASE` env var name is fixed by §9).
- *
- * All durations referenced here are metric SI seconds; timestamps are ISO-8601.
+ * One typed method per contract route — nothing more, nothing less. All
+ * durations in this module's docs are metric SI seconds; timestamps are
+ * ISO-8601 UTC strings.
  * ----------------------------------------------------------------------------
  */
 
 import type {
-  Forfeit,
-  ForfeitState,
-  HallEntry,
-  HubPayload,
+  LeaderboardRow,
   Match,
-  Outcome1x2,
+  MatchStatus,
+  MatchWithMine,
   Prediction,
-  ProofKind,
+  PredictionWithUser,
+  User,
+  WagerPick,
+  WagerState,
+  WagerView,
 } from '../types/models';
 
 /* ===========================================================================
- * Configuration
+ * Configuration & token storage
  * ======================================================================== */
 
-/** Resolved API base path. `VITE_API_BASE` overrides the localhost default. */
-export const API_BASE: string =
-  import.meta.env.VITE_API_BASE ?? 'http://localhost:8080/api';
+/** Resolved API base path. `VITE_API_BASE` (CONTRACT §8) overrides '/api'. */
+export const API_BASE: string = import.meta.env.VITE_API_BASE || '/api';
 
-/* ===========================================================================
- * Low-level request helper
- * ======================================================================== */
+/** The fixed localStorage key for the session JWT (CONTRACT §6). */
+const TOKEN_KEY = 'almanac_token';
 
-/** Options accepted by the internal request helper. */
-interface RequestOptions {
-  method?: 'GET' | 'POST';
-  /** JSON body for POST requests; serialised with JSON.stringify. */
-  body?: unknown;
-  /** Query parameters appended to the path (undefined values are skipped). */
-  query?: Record<string, string | undefined>;
+/** Read the persisted JWT, or null when signed out. */
+export function getToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
 }
 
+/** Persist the JWT after a successful login. */
+export function setToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+/** Drop the JWT (sign-out, or a 401 during boot re-validation). */
+export function clearToken(): void {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+/* ===========================================================================
+ * Errors
+ * ======================================================================== */
+
 /**
- * Sentinel error thrown when the backend is reachable but answers with a
- * non-2xx status. Callers (or the mock-fallback layer) can distinguish a real
- * HTTP error from a transport failure by `instanceof ApiError`.
+ * Typed error raised when the API answers with a non-2xx status. Carries the
+ * HTTP status plus the contract error code (`VALIDATION`, `UNAUTHENTICATED`,
+ * `FORBIDDEN`, `NOT_FOUND`, `MATCH_LOCKED`, `WAGER_CONFLICT`, `INTERNAL`).
+ * Transport failures (server unreachable) reject with the browser's native
+ * TypeError instead — callers can distinguish via `instanceof ApiError`.
  */
 export class ApiError extends Error {
   public readonly status: number;
   public readonly code: string;
+
   constructor(status: number, code: string, message: string) {
     super(message);
     this.name = 'ApiError';
@@ -67,15 +80,26 @@ export class ApiError extends Error {
   }
 }
 
+/* ===========================================================================
+ * Low-level request helper
+ * ======================================================================== */
+
+/** Options accepted by the internal request helper. */
+interface RequestOptions {
+  method?: 'GET' | 'POST' | 'DELETE';
+  /** JSON body for POST requests; serialised with JSON.stringify. */
+  body?: unknown;
+  /** Query parameters appended to the path (undefined values are skipped). */
+  query?: Record<string, string | undefined>;
+}
+
 /**
  * Perform a JSON request against the API.
  *
- * - On a successful 2xx response, resolves with the parsed JSON as `T`.
- * - On a non-2xx response, throws an {@link ApiError} (the backend is up but
- *   rejected the request — propagate so the UI can handle it, e.g. 409 locks).
- * - On a transport failure (DNS/connection refused — backend down), the
- *   underlying `fetch` rejects with a `TypeError`; we re-throw it so the public
- *   wrapper can swap in mock data.
+ * - 2xx  → resolves with the parsed JSON as `T`.
+ * - non-2xx → throws {@link ApiError}, populated from the error envelope
+ *   (falling back to a generic INTERNAL error when the body is not JSON).
+ * - transport failure → the native fetch rejection propagates unchanged.
  */
 async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, query } = opts;
@@ -95,26 +119,33 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
     }
   }
 
+  // Assemble headers: JSON content type when a body ships, Bearer token when
+  // a session exists (localStorage 'almanac_token').
+  const headers: Record<string, string> = {};
+  if (body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+  }
+  const token = getToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const response = await fetch(url, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
   });
 
   if (!response.ok) {
-    // Backend answered with an error envelope { error: { code, message } } (§6).
-    let code = 'http_error';
-    let message = `Request failed with status ${response.status}`;
+    // Unwrap the contract error envelope { error: { code, message } }.
+    let code = 'INTERNAL';
+    let message = `request failed with status ${response.status}`;
     try {
       const payload = (await response.json()) as {
         error?: { code?: string; message?: string };
       };
-      if (payload.error?.code) {
-        code = payload.error.code;
-      }
-      if (payload.error?.message) {
-        message = payload.error.message;
-      }
+      if (payload.error?.code) code = payload.error.code;
+      if (payload.error?.message) message = payload.error.message;
     } catch {
       // Body was not JSON; keep the generic message.
     }
@@ -124,349 +155,125 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   return (await response.json()) as T;
 }
 
-/**
- * Wrap a live request so that a transport failure (backend unreachable) falls
- * back to mock data. An {@link ApiError} (backend up but rejected) is rethrown
- * so the UI still sees real HTTP errors (e.g. a 409 prediction lock).
- *
- * @param live  Thunk performing the real request.
- * @param mock  Thunk producing realistic fallback data.
- */
-async function withMockFallback<T>(
-  live: () => Promise<T>,
-  mock: () => T,
-): Promise<T> {
-  try {
-    return await live();
-  } catch (err) {
-    if (err instanceof ApiError) {
-      // Backend is alive and deliberately rejected — surface the real error.
-      throw err;
-    }
-    // Transport-level failure (offline / no backend) → render with mock data.
-    // eslint-disable-next-line no-console
-    console.warn(
-      `[api] backend unreachable — serving mock data for this call:`,
-      err,
-    );
-    return mock();
-  }
-}
-
 /* ===========================================================================
- * Mock data — realistic fixtures so the SPA is fully explorable offline.
- * Identifiers are stable UUID-shaped strings; timestamps are computed relative
- * to "now" so countdowns and "upcoming" filters behave naturally.
+ * Typed API surface — one method per contract route (§6).
  * ======================================================================== */
 
-/** Produce an ISO-8601 timestamp `offsetSecs` seconds from now (metric SI). */
-function isoFromNow(offsetSecs: number): string {
-  return new Date(Date.now() + offsetSecs * 1000).toISOString();
-}
-
-// Stable mock user ids reused across mock entities.
-const MOCK_USERS = {
-  raya: '11111111-1111-1111-1111-111111111111',
-  diego: '22222222-2222-2222-2222-222222222222',
-  amara: '33333333-3333-3333-3333-333333333333',
-  kenji: '44444444-4444-4444-4444-444444444444',
-} as const;
-
-/** Build a mock fixture; `kickoffOffsetSecs` is relative to now (SI seconds). */
-function mockMatch(
-  id: string,
-  home: string,
-  away: string,
-  group: string,
-  venue: string,
-  kickoffOffsetSecs: number,
-  status: Match['status'] = 'scheduled',
-  homeScore: number | null = null,
-  awayScore: number | null = null,
-): Match {
-  return {
-    id,
-    ext_ref: `FX-${id.slice(0, 4).toUpperCase()}`,
-    home_team: home,
-    away_team: away,
-    group_label: group,
-    venue,
-    kickoff_at: isoFromNow(kickoffOffsetSecs),
-    // lock_at mirrors the GENERATED column: kickoff − 60 s.
-    lock_at: isoFromNow(kickoffOffsetSecs - 60),
-    status,
-    home_score: homeScore,
-    away_score: awayScore,
-    created_at: isoFromNow(-86_400),
-  };
-}
-
-/** The canonical mock fixture list (kickoffs spread across the next ~30 h). */
-const MOCK_MATCHES: Match[] = [
-  mockMatch('aaaa1111-0000-0000-0000-000000000001', 'Argentina', 'Mexico', 'GROUP F', 'Estadio Azteca, Mexico City', 8_040),
-  mockMatch('aaaa1111-0000-0000-0000-000000000002', 'Brazil', 'Croatia', 'GROUP H', 'MetLife Stadium, New York/NJ', -4_020, 'live', 1, 0),
-  mockMatch('aaaa1111-0000-0000-0000-000000000003', 'United States', 'Netherlands', 'GROUP D', 'SoFi Stadium, Los Angeles', 17_700),
-  mockMatch('aaaa1111-0000-0000-0000-000000000004', 'France', 'Morocco', 'GROUP C', 'AT&T Stadium, Dallas', 28_200),
-  mockMatch('aaaa1111-0000-0000-0000-000000000005', 'England', 'Senegal', 'GROUP E', 'Mercedes-Benz Stadium, Atlanta', 79_500),
-  mockMatch('aaaa1111-0000-0000-0000-000000000006', 'Spain', 'Japan', 'GROUP G', 'Hard Rock Stadium, Miami', 89_400),
-  mockMatch('aaaa1111-0000-0000-0000-000000000007', 'Portugal', 'Uruguay', 'GROUP I', 'Lumen Field, Seattle', 109_200),
-];
-
-/** Mock group standings (two illustrative groups, ranked by points). */
-const MOCK_STANDINGS = [
-  { group_label: 'GROUP F', team: 'Argentina', played: 2, won: 2, drawn: 0, lost: 0, goals_for: 5, goals_against: 1, goal_difference: 4, points: 6 },
-  { group_label: 'GROUP F', team: 'Mexico', played: 2, won: 1, drawn: 0, lost: 1, goals_for: 3, goals_against: 3, goal_difference: 0, points: 3 },
-  { group_label: 'GROUP F', team: 'Poland', played: 2, won: 1, drawn: 0, lost: 1, goals_for: 2, goals_against: 3, goal_difference: -1, points: 3 },
-  { group_label: 'GROUP F', team: 'Saudi Arabia', played: 2, won: 0, drawn: 0, lost: 2, goals_for: 1, goals_against: 4, goal_difference: -3, points: 0 },
-  { group_label: 'GROUP H', team: 'Brazil', played: 2, won: 1, drawn: 1, lost: 0, goals_for: 4, goals_against: 2, goal_difference: 2, points: 4 },
-  { group_label: 'GROUP H', team: 'Croatia', played: 2, won: 1, drawn: 1, lost: 0, goals_for: 3, goals_against: 2, goal_difference: 1, points: 4 },
-  { group_label: 'GROUP H', team: 'Cameroon', played: 2, won: 0, drawn: 1, lost: 1, goals_for: 2, goals_against: 3, goal_difference: -1, points: 1 },
-  { group_label: 'GROUP H', team: 'Serbia', played: 2, won: 0, drawn: 1, lost: 1, goals_for: 1, goals_against: 3, goal_difference: -2, points: 1 },
-];
-
-/** Build a mock forfeit row in a given lifecycle state. */
-function mockForfeit(
-  id: string,
-  challenger: string,
-  opponent: string,
-  matchId: string | null,
-  stake: string,
-  state: ForfeitState,
-  loser: string | null = null,
-): Forfeit {
-  return {
-    id,
-    challenger_id: challenger,
-    opponent_id: opponent,
-    match_id: matchId,
-    stake,
-    state,
-    loser_id: loser,
-    created_at: isoFromNow(-43_200),
-    accepted_at: state === 'pending' ? null : isoFromNow(-39_600),
-    unsettled_at: state === 'unsettled' || state === 'resolved' ? isoFromNow(-7_200) : null,
-    resolved_at: state === 'resolved' ? isoFromNow(-3_600) : null,
-    nudge_count: state === 'unsettled' ? 1 : 0,
-    last_nudge_at: state === 'unsettled' ? isoFromNow(-1_800) : null,
-  };
-}
-
-/** Mock forfeits spanning all four Bloodline states. */
-const MOCK_FORFEITS: Forfeit[] = [
-  mockForfeit('bbbb2222-0000-0000-0000-000000000001', MOCK_USERS.raya, MOCK_USERS.diego, MOCK_MATCHES[0].id, 'Wear the rival jersey for a full workday', 'pending'),
-  mockForfeit('bbbb2222-0000-0000-0000-000000000002', MOCK_USERS.amara, MOCK_USERS.kenji, MOCK_MATCHES[2].id, 'Sing the loser’s anthem on video', 'active'),
-  mockForfeit('bbbb2222-0000-0000-0000-000000000003', MOCK_USERS.diego, MOCK_USERS.amara, MOCK_MATCHES[1].id, 'Buy the group dinner — no excuses', 'unsettled', MOCK_USERS.amara),
-  mockForfeit('bbbb2222-0000-0000-0000-000000000004', MOCK_USERS.kenji, MOCK_USERS.raya, null, 'Dye hair in the winner’s colours', 'resolved', MOCK_USERS.kenji),
-];
-
-/** Mock Hall of Shame entries with tribunal tallies. */
-const MOCK_HALL: HallEntry[] = [
-  {
-    id: 'cccc3333-0000-0000-0000-000000000001',
-    forfeit_id: MOCK_FORFEITS[3].id,
-    loser_id: MOCK_USERS.kenji,
-    proof_url: 'https://images.unsplash.com/photo-1517649763962-0c623066013b?w=640',
-    proof_kind: 'image',
-    caption: 'Hair dyed full vermillion. A deal is a deal.',
-    verified: true,
-    created_at: isoFromNow(-3_600),
-    up: 9,
-    down: 2,
-    net: 7,
+export const api = {
+  /** GET /api/health → { status: 'ok', uptime_secs } (uptime in SI seconds). */
+  health(): Promise<{ status: string; uptime_secs: number }> {
+    return request('/health');
   },
-  {
-    id: 'cccc3333-0000-0000-0000-000000000002',
-    forfeit_id: MOCK_FORFEITS[2].id,
-    loser_id: MOCK_USERS.amara,
-    proof_url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-    proof_kind: 'video',
-    caption: 'Anthem performed, badly. The tribunal will decide.',
-    verified: false,
-    created_at: isoFromNow(-1_200),
-    up: 2,
-    down: 1,
-    net: 1,
+
+  /** POST /api/auth/login {username, display_name?} → { token, user }. */
+  login(username: string, displayName?: string): Promise<{ token: string; user: User }> {
+    const body: { username: string; display_name?: string } = { username };
+    if (displayName !== undefined) body.display_name = displayName;
+    return request('/auth/login', { method: 'POST', body });
   },
-  {
-    id: 'cccc3333-0000-0000-0000-000000000003',
-    forfeit_id: 'bbbb2222-0000-0000-0000-000000000099',
-    loser_id: MOCK_USERS.diego,
-    proof_url: 'https://example.com/receipt-dinner-proof',
-    proof_kind: 'link',
-    caption: 'Receipt for the entire group dinner attached.',
-    verified: false,
-    created_at: isoFromNow(-600),
-    up: 1,
-    down: 0,
-    net: 1,
+
+  /** GET /api/auth/me (auth) → the signed-in User (token re-validation). */
+  me(): Promise<User> {
+    return request('/auth/me');
   },
-];
 
-/* ===========================================================================
- * Public API surface — one function per endpoint group used by the views.
- * ======================================================================== */
+  /** GET /api/matches (opt auth) → all fixtures, kickoff_at ASC, with my_prediction when authed. */
+  listMatches(): Promise<MatchWithMine[]> {
+    return request('/matches');
+  },
 
-/** GET /api/hub?user_id=:uuid → aggregated dashboard payload. */
-export function getHub(userId: string): Promise<HubPayload> {
-  return withMockFallback(
-    () => request<HubPayload>('/hub', { query: { user_id: userId } }),
-    () => ({
-      upcoming_matches: MOCK_MATCHES.filter((m) => m.status === 'scheduled'),
-      standings: MOCK_STANDINGS,
-      active_forfeits: MOCK_FORFEITS.filter((f) => f.state === 'active' || f.state === 'pending'),
-    }),
-  );
-}
+  /** GET /api/matches/next (opt auth) → first match with lock_at > now (or null). */
+  nextMatch(): Promise<{ match: MatchWithMine | null }> {
+    return request('/matches/next');
+  },
 
-/** GET /api/matches → all fixtures. */
-export function listMatches(): Promise<Match[]> {
-  return withMockFallback(
-    () => request<Match[]>('/matches'),
-    () => MOCK_MATCHES,
-  );
-}
+  /** GET /api/matches/:id (opt auth) → a single fixture. */
+  getMatch(id: string): Promise<MatchWithMine> {
+    return request(`/matches/${id}`);
+  },
 
-/** GET /api/forfeits?user_id=:uuid&state= → forfeits, optionally filtered. */
-export function listForfeits(
-  userId: string,
-  state?: ForfeitState,
-): Promise<Forfeit[]> {
-  return withMockFallback(
-    () => request<Forfeit[]>('/forfeits', { query: { user_id: userId, state } }),
-    () => (state ? MOCK_FORFEITS.filter((f) => f.state === state) : MOCK_FORFEITS),
-  );
-}
+  /**
+   * GET /api/matches/:id/predictions → everyone's calls, ONLY once
+   * now ≥ lock_at (the server answers 409 MATCH_LOCKED before that —
+   * picks are secret until lock).
+   */
+  matchPredictions(id: string): Promise<PredictionWithUser[]> {
+    return request(`/matches/${id}/predictions`);
+  },
 
-/** Payload for creating a new forfeit challenge (POST /api/forfeits, §6). */
-export interface CreateForfeitInput {
-  challenger_id: string;
-  opponent_id: string;
-  match_id?: string;
-  stake: string;
-}
+  /**
+   * POST /api/predictions (auth) {match_id, pred_home, pred_away} →
+   * upserted Prediction. 409 MATCH_LOCKED once now ≥ lock_at; scores 0–20.
+   */
+  upsertPrediction(input: {
+    match_id: string;
+    pred_home: number;
+    pred_away: number;
+  }): Promise<Prediction> {
+    return request('/predictions', { method: 'POST', body: input });
+  },
 
-/** POST /api/forfeits → newly created Forfeit in the `pending` state. */
-export function createForfeit(input: CreateForfeitInput): Promise<Forfeit> {
-  return withMockFallback(
-    () => request<Forfeit>('/forfeits', { method: 'POST', body: input }),
-    () =>
-      mockForfeit(
-        `bbbb2222-0000-0000-0000-${Date.now().toString().slice(-12).padStart(12, '0')}`,
-        input.challenger_id,
-        input.opponent_id,
-        input.match_id ?? null,
-        input.stake,
-        'pending',
-      ),
-  );
-}
+  /** GET /api/predictions/mine (auth) → all of my predictions. */
+  myPredictions(): Promise<Prediction[]> {
+    return request('/predictions/mine');
+  },
 
-/** POST /api/forfeits/:id/accept → Forfeit transitioned to `active`. */
-export function acceptForfeit(id: string): Promise<Forfeit> {
-  return withMockFallback(
-    () => request<Forfeit>(`/forfeits/${id}/accept`, { method: 'POST' }),
-    () => ({ ...mockForfeit(id, MOCK_USERS.raya, MOCK_USERS.diego, null, 'Accepted challenge', 'active') }),
-  );
-}
+  /** GET /api/leaderboard → ranked season table (DENSE_RANK, one query). */
+  leaderboard(): Promise<LeaderboardRow[]> {
+    return request('/leaderboard');
+  },
 
-/** POST /api/forfeits/:id/decline → Forfeit transitioned to `resolved`. */
-export function declineForfeit(id: string): Promise<Forfeit> {
-  return withMockFallback(
-    () => request<Forfeit>(`/forfeits/${id}/decline`, { method: 'POST' }),
-    () => ({ ...mockForfeit(id, MOCK_USERS.raya, MOCK_USERS.diego, null, 'Declined challenge', 'resolved') }),
-  );
-}
+  /** GET /api/wagers?state=&user_id= → WagerView[] newest first. */
+  listWagers(filters: { state?: WagerState; user_id?: string } = {}): Promise<WagerView[]> {
+    return request('/wagers', { query: { state: filters.state, user_id: filters.user_id } });
+  },
 
-/** Payload for submitting punishment proof (POST /api/forfeits/:id/proof). */
-export interface SubmitProofInput {
-  proof_url: string;
-  proof_kind: ProofKind;
-  caption?: string;
-}
+  /** POST /api/wagers (auth) {match_id, pick, margin?, claim} → new WagerView. */
+  createWager(input: {
+    match_id: string;
+    pick: WagerPick;
+    margin?: number;
+    claim: string;
+  }): Promise<WagerView> {
+    return request('/wagers', { method: 'POST', body: input });
+  },
 
-/**
- * POST /api/forfeits/:id/proof → Forfeit stays `unsettled` and a Hall of Shame
- * row is created (verified=false). Returns the resulting HallEntry for the UI.
- */
-export function submitProof(
-  forfeitId: string,
-  input: SubmitProofInput,
-): Promise<HallEntry> {
-  return withMockFallback(
-    () => request<HallEntry>(`/forfeits/${forfeitId}/proof`, { method: 'POST', body: input }),
-    () => ({
-      id: `cccc3333-0000-0000-0000-${Date.now().toString().slice(-12).padStart(12, '0')}`,
-      forfeit_id: forfeitId,
-      loser_id: MOCK_USERS.diego,
-      proof_url: input.proof_url,
-      proof_kind: input.proof_kind,
-      caption: input.caption ?? null,
-      verified: false,
-      created_at: isoFromNow(0),
-      up: 0,
-      down: 0,
-      net: 0,
-    }),
-  );
-}
+  /** POST /api/wagers/:id/accept (auth) {forfeit} → the ACCEPTED WagerView. */
+  acceptWager(id: string, forfeit: string): Promise<WagerView> {
+    return request(`/wagers/${id}/accept`, { method: 'POST', body: { forfeit } });
+  },
 
-/** GET /api/hall → Hall of Shame entries with vote tallies. */
-export function listHall(): Promise<HallEntry[]> {
-  return withMockFallback(
-    () => request<HallEntry[]>('/hall'),
-    () => MOCK_HALL,
-  );
-}
+  /** DELETE /api/wagers/:id (auth) — creator only, PENDING only. */
+  deleteWager(id: string): Promise<{ deleted: boolean }> {
+    return request(`/wagers/${id}`, { method: 'DELETE' });
+  },
 
-/**
- * POST /api/hall/:entryId/vote → cast a tribunal vote (+1 up / −1 down).
- * Returns the updated entry (tallies may flip `verified` and resolve the
- * forfeit when the net threshold is reached, per §4/§6).
- */
-export function voteShame(
-  entryId: string,
-  voterId: string,
-  vote: 1 | -1,
-): Promise<HallEntry> {
-  return withMockFallback(
-    () =>
-      request<HallEntry>(`/hall/${entryId}/vote`, {
-        method: 'POST',
-        body: { voter_id: voterId, vote },
-      }),
-    () => {
-      // Optimistic local tally update for the offline mock.
-      const base =
-        MOCK_HALL.find((e) => e.id === entryId) ?? MOCK_HALL[0];
-      const up = base.up + (vote === 1 ? 1 : 0);
-      const down = base.down + (vote === -1 ? 1 : 0);
-      const net = up - down;
-      // TRIBUNAL_NET_VOTES = 3 (§4): net ≥ 3 flips verified true.
-      return { ...base, up, down, net, verified: net >= 3 };
-    },
-  );
-}
+  /**
+   * POST /api/admin/matches/:id/score (admin) {home_score, away_score} →
+   * runs the full settlement pipeline (scores 5/2/0, totals, wagers) in one
+   * transaction; idempotent on re-submission of corrected scores.
+   */
+  adminScore(
+    id: string,
+    home_score: number,
+    away_score: number,
+  ): Promise<{ match: Match; predictions_scored: number; wagers_resolved: number }> {
+    return request(`/admin/matches/${id}/score`, {
+      method: 'POST',
+      body: { home_score, away_score },
+    });
+  },
 
-/* ===========================================================================
- * Predictions surface (used by future wiring; included for §6 completeness).
- * ======================================================================== */
+  /** POST /api/admin/matches/:id/feature (admin) {is_featured} → Match. */
+  adminFeature(id: string, is_featured: boolean): Promise<Match> {
+    return request(`/admin/matches/${id}/feature`, { method: 'POST', body: { is_featured } });
+  },
 
-/** Payload for upserting a prediction (POST /api/predictions, §6). */
-export interface UpsertPredictionInput {
-  user_id: string;
-  match_id: string;
-  outcome: Outcome1x2;
-  exact_home?: number;
-  exact_away?: number;
-}
-
-/**
- * GET /api/predictions?user_id=:uuid → a user's predictions.
- * Mock returns an empty slate (the Predict view self-seeds its own demo state).
- */
-export function listPredictions(userId: string): Promise<Prediction[]> {
-  return withMockFallback(
-    () => request<Prediction[]>('/predictions', { query: { user_id: userId } }),
-    () => [],
-  );
-}
+  /**
+   * POST /api/admin/matches/:id/status (admin) {status} → Match.
+   * Only 'scheduled' | 'live' here — 'final' is reachable solely via /score.
+   */
+  adminStatus(id: string, status: Exclude<MatchStatus, 'final'>): Promise<Match> {
+    return request(`/admin/matches/${id}/status`, { method: 'POST', body: { status } });
+  },
+};

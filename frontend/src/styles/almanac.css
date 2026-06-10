@@ -1,0 +1,358 @@
+/* ============================================================================
+ * almanac.css — the "Warm Almanac" design system (CONTRACT §7.1, STRICT).
+ * ----------------------------------------------------------------------------
+ * A cozy printed-paper aesthetic with neo-brutalist bones: cream paper, ink
+ * borders, hard offset shadows (zero blur), Fraunces serif display + Hanken
+ * Grotesk body. Risograph zine meets field journal.
+ *
+ * Three structural signatures, applied EVERYWHERE:
+ *   1. border: 1.5px solid var(--ink) on every surface.
+ *   2. Hard offset shadow, zero blur: cards 6px 6px 0, buttons 3px 3px 0,
+ *      small things 2px 2px 0 (all offsets in px, metric).
+ *   3. Press interaction: hover translate(-1px,-1px); active translate(2px,2px)
+ *      with the shadow collapsing to 1px 1px 0.
+ *
+ * Radii: cards 18–22 px · inputs/buttons 12 px · inset cells 14–16 px ·
+ * pills 999 px · tiny badges 6 px. Selected/active states get an ink fill.
+ *
+ * --ink is for text and EVERY border; --hair/--hair2 are for divider lines and
+ * gridlines ONLY — never box outlines.
+ *
+ * Imported exactly once, from src/main.tsx. View-specific styles may live in
+ * co-located <style> blocks but MUST consume these CSS variables.
+ * ========================================================================== */
+
+/* ---------------------------------------------------------------------------
+ * Tokens — light (paper) theme. Verbatim from CONTRACT §7.1.
+ * ------------------------------------------------------------------------ */
+:root {
+  --bg: #FBF6EC; --ink: #2B2420; --card: #FFFDF8; --inset: #FBF6EC;
+  --muted: #6B5F54; --muted2: #8A7E72;
+  --accent: #E9A23B; --gold: #B08442;
+  --track: #EADFCE; --hero: #FFF6E4;
+  --hair: rgba(43,36,32,.12); --hair2: rgba(43,36,32,.25);
+  --shadow: rgba(43,36,32,.9); --focus: rgba(43,36,32,.08);
+  --grad1: rgba(233,162,59,.18); --grad2: rgba(42,157,143,.16);
+  color-scheme: light;
+}
+
+/* Dark theme — toggled via data-theme on <html>, persisted as
+ * localStorage 'almanac_theme'. Verbatim from CONTRACT §7.1. */
+[data-theme="dark"] {
+  --bg: #15120D; --ink: #F1E7D6; --card: #221C15; --inset: #2B241B;
+  --muted: #C7BAA6; --muted2: #9E9282;
+  --accent: #E9A23B; --gold: #D9B271;
+  --track: #3A3329; --hero: #2A2017;
+  --hair: rgba(241,231,214,.14); --hair2: rgba(241,231,214,.26);
+  --shadow: rgba(0,0,0,.55); --focus: rgba(241,231,214,.1);
+  --grad1: rgba(233,162,59,.10); --grad2: rgba(42,157,143,.10);
+  color-scheme: dark;
+}
+
+/* ---------------------------------------------------------------------------
+ * Extension tokens — beyond the contract's verbatim set, derived from it.
+ * --scrim: the modal backdrop wash, built from the theme's ink/shadow base so
+ *   dark mode deepens deliberately rather than by accident.
+ * --chevron: an inline-SVG ink chevron for custom <select> arrows; SVG data
+ *   URIs cannot reference var(), so each theme stamps its own --ink hex
+ *   (light #2B2420, dark #F1E7D6) into the stroke. 12×8 px glyph.
+ * ------------------------------------------------------------------------ */
+:root {
+  --scrim: rgba(43, 36, 32, .45); /* light: --ink (#2B2420) at 45 % */
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%232B2420' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+[data-theme="dark"] {
+  --scrim: rgba(0, 0, 0, .62);    /* dark: --shadow's black base, deepened */
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23F1E7D6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+/* ---------------------------------------------------------------------------
+ * Base classes — verbatim from CONTRACT §7.1, then extended further below.
+ * ------------------------------------------------------------------------ */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Hanken Grotesk', sans-serif; color: var(--ink); min-height: 100vh; padding: 28px 18px 60px; }
+.wrap { max-width: 760px; margin: 0 auto; }
+.kicker { font-size: 12px; letter-spacing: .28em; text-transform: uppercase; font-weight: 700; color: var(--gold); }
+.title { font-family: 'Fraunces', serif; font-weight: 900; line-height: .95; font-size: clamp(38px, 9vw, 68px); letter-spacing: -.02em; }
+.sub { font-size: 15px; color: var(--muted); max-width: 46ch; }
+.card { background: var(--card); border: 1.5px solid var(--ink); border-radius: 22px; padding: 22px; box-shadow: 6px 6px 0 var(--shadow); }
+.card h2 { font-family: 'Fraunces', serif; font-weight: 600; font-size: 22px; }
+.hint { font-size: 13px; color: var(--muted); }
+.btn { font-family: inherit; font-weight: 600; background: var(--accent); color: #2B2420; border: 1.5px solid var(--ink); border-radius: 12px; padding: 13px 22px; cursor: pointer; box-shadow: 3px 3px 0 var(--shadow); transition: transform .08s, box-shadow .08s; }
+.btn:hover { transform: translate(-1px, -1px); }
+.btn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--shadow); }
+.input { width: 100%; font: inherit; background: var(--inset); border: 1.5px solid var(--ink); border-radius: 12px; padding: 12px 14px; outline: none; }
+.input:focus { box-shadow: 3px 3px 0 var(--focus); }
+.chip { font-weight: 700; border: 1.5px solid var(--ink); border-radius: 999px; padding: 11px 20px; cursor: pointer; background: var(--card); box-shadow: 3px 3px 0 var(--shadow); }
+.chip.on { background: var(--ink); color: var(--card); }
+
+/* ---------------------------------------------------------------------------
+ * Body background — the layered radial-gradient paper wash (never flat).
+ * Verbatim from CONTRACT §7.1.
+ * ------------------------------------------------------------------------ */
+body {
+  background:
+    radial-gradient(1200px 600px at 80% -20%, var(--grad1), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, var(--grad2), transparent 60%),
+    var(--bg);
+}
+
+/* ---------------------------------------------------------------------------
+ * Global accessibility & typographic extensions.
+ * ------------------------------------------------------------------------ */
+
+/* Visible keyboard focus on every interactive element. */
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/* Links inherit ink by default; specific link styles opt in below. */
+a { color: inherit; }
+
+/* Tabular ("stamped") numerals wherever numbers line up in columns. */
+.tnum { font-variant-numeric: tabular-nums; }
+
+/* Press interaction for chips too — the signature applies everywhere. */
+.chip { font-family: inherit; transition: transform .08s, box-shadow .08s; }
+.chip:hover { transform: translate(-1px, -1px); }
+.chip:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--shadow); }
+.chip:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+.chip--small { padding: 8px 14px; font-size: 13px; box-shadow: 2px 2px 0 var(--shadow); }
+
+/* Button variants. Disabled rules come AFTER hover/active so they win ties. */
+.btn--small { padding: 8px 14px; font-size: 14px; box-shadow: 2px 2px 0 var(--shadow); }
+.btn--ghost { background: var(--card); color: var(--ink); }
+.btn:disabled { opacity: .55; cursor: not-allowed; transform: none; box-shadow: 3px 3px 0 var(--shadow); }
+.btn--small:disabled { box-shadow: 2px 2px 0 var(--shadow); }
+
+/* Small bordered icon/utility button (theme toggle, modal close, sign out). */
+.iconbtn {
+  font: inherit; font-weight: 600; background: var(--card); color: var(--ink);
+  border: 1.5px solid var(--ink); border-radius: 12px; padding: 8px 12px;
+  cursor: pointer; box-shadow: 2px 2px 0 var(--shadow);
+  transition: transform .08s, box-shadow .08s;
+}
+.iconbtn:hover { transform: translate(-1px, -1px); }
+.iconbtn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--shadow); }
+
+/* Textareas share the .input look; allow a little vertical give. */
+textarea.input { resize: vertical; min-height: 64px; }
+
+/* Selects share the .input look too, with the OS chrome stripped: appearance
+ * reset + the theme's ink chevron (--chevron, 12×8 px) stamped on the right.
+ * The open popup stays native (color-scheme keeps it on-theme), but the
+ * closed control reads as paper, not generic UI. */
+select.input {
+  appearance: none; -webkit-appearance: none;
+  background-image: var(--chevron);
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 12px 8px;
+  padding-right: 40px; /* 14 px inset + 12 px glyph + breathing room */
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------------------------
+ * App shell — header, content region, bottom tab bar.
+ * ------------------------------------------------------------------------ */
+.apphead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 22px; }
+.apphead-actions { display: flex; align-items: center; gap: 10px; }
+
+/* Clear the fixed bottom tab bar (bar ≈ 64 px + safe area). */
+.app-main { padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
+
+/* Paper bar pinned to the thumb zone; ink top border; active tab is an
+ * ink-filled "pressed on" pill. */
+.tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+  display: flex; justify-content: center; align-items: center; gap: 8px;
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+  background: var(--card); border-top: 1.5px solid var(--ink);
+}
+.tab {
+  font-weight: 700; font-size: 13px; text-decoration: none; color: var(--ink);
+  border: 1.5px solid var(--ink); border-radius: 999px; padding: 8px 14px;
+  background: var(--card); box-shadow: 2px 2px 0 var(--shadow);
+  transition: transform .08s, box-shadow .08s; white-space: nowrap;
+}
+.tab:hover { transform: translate(-1px, -1px); }
+.tab:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--shadow); }
+.tab.on { background: var(--ink); color: var(--card); box-shadow: 1px 1px 0 var(--shadow); transform: translate(1px, 1px); }
+
+/* ---------------------------------------------------------------------------
+ * Layout utilities.
+ * ------------------------------------------------------------------------ */
+.stack { display: grid; gap: 16px; }
+.row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.row-between { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.section { margin-top: 28px; }
+.section > .kicker { display: block; margin-bottom: 12px; }
+.view-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 28px; margin: 6px 0 18px; }
+.day-heading { font-family: 'Fraunces', serif; font-weight: 600; font-size: 21px; margin: 26px 0 12px; }
+.filters { display: flex; gap: 10px; flex-wrap: wrap; }
+.table-link { display: inline-block; margin-top: 12px; color: var(--gold); font-weight: 700; font-size: 13px; text-decoration: none; }
+.table-link:hover { text-decoration: underline; }
+
+/* Horizontal "Main Events" rail — hero cards snap side by side. */
+.rail { display: grid; grid-auto-flow: column; grid-auto-columns: min(420px, 86%); gap: 16px; overflow-x: auto; padding: 2px 2px 12px; scroll-snap-type: x proximity; }
+.rail > * { scroll-snap-align: start; }
+
+/* ---------------------------------------------------------------------------
+ * State chips — match-state & wager-state jewel coding.
+ * Jewel palette: gold #E9A23B · teal #2A9D8F · coral #E8654F ·
+ * forest #2E9E5B · blue #2D65A4 · violet #6C5CE7.
+ * Text on light accents = #2B2420; on dark fills = #FFF7EA.
+ * ------------------------------------------------------------------------ */
+.statechip {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 11px; font-weight: 700; letter-spacing: .06em;
+  border: 1.5px solid var(--ink); border-radius: 999px; padding: 4px 10px;
+  box-shadow: 2px 2px 0 var(--shadow); white-space: nowrap;
+}
+.statechip--gold   { background: #E9A23B; color: #2B2420; }
+.statechip--teal   { background: #2A9D8F; color: #FFF7EA; }
+.statechip--coral  { background: #E8654F; color: #FFF7EA; }
+.statechip--forest { background: #2E9E5B; color: #FFF7EA; }
+.statechip--ink    { background: var(--ink); color: var(--card); }
+.statechip--quiet  { background: var(--track); color: var(--muted); }
+
+/* Subtle live pulse: a breathing dot, not a flashing chip. */
+.statechip--pulse::before {
+  content: ''; width: 7px; height: 7px; border-radius: 999px;
+  background: currentColor; animation: almanac-pulse 1.6s ease-in-out infinite;
+}
+@keyframes almanac-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+
+/* Points badge on settled cards: +5 exact / +2 outcome / 0. Tiny badge → 6px. */
+.points-badge {
+  display: inline-block; font-size: 12px; font-weight: 700;
+  border: 1.5px solid var(--ink); border-radius: 6px; padding: 3px 8px;
+  box-shadow: 2px 2px 0 var(--shadow); font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.points-badge--exact   { background: #2E9E5B; color: #FFF7EA; }
+.points-badge--outcome { background: #2A9D8F; color: #FFF7EA; }
+.points-badge--zero    { background: var(--track); color: var(--muted); }
+
+/* ---------------------------------------------------------------------------
+ * Match cards.
+ * ------------------------------------------------------------------------ */
+.match-card { display: grid; gap: 14px; }
+.match-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.match-meta .match-venue { margin-left: auto; text-align: right; }
+.match-teams { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; }
+.team-name { font-family: 'Fraunces', serif; font-weight: 600; font-size: 20px; line-height: 1.1; }
+.team-name--away { text-align: right; }
+.match-vs { font-size: 13px; color: var(--muted2); font-weight: 700; }
+.match-score { font-family: 'Fraunces', serif; font-weight: 900; font-size: 34px; letter-spacing: -.02em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.match-callline { font-weight: 600; font-size: 14px; font-variant-numeric: tabular-nums; }
+.match-result { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+/* Featured "Main Event" hero treatment: warmer paper, bigger Fraunces type,
+ * bolder presence (still 1.5px ink border + 6px shadow). */
+.card--hero { background: var(--hero); }
+.match-card--hero .team-name { font-size: 26px; }
+.match-card--hero .match-score { font-size: 44px; }
+.mainevent { display: grid; gap: 8px; }
+
+/* ---------------------------------------------------------------------------
+ * Score stepper — − / value / + with Fraunces 900 "stamped" numerals.
+ * ------------------------------------------------------------------------ */
+.stepper { display: inline-flex; align-items: center; gap: 8px; background: var(--inset); border: 1.5px solid var(--ink); border-radius: 14px; padding: 6px 8px; }
+.stepper-btn {
+  width: 34px; height: 34px; font-size: 18px; font-weight: 700; line-height: 1;
+  background: var(--card); color: var(--ink); border: 1.5px solid var(--ink);
+  border-radius: 10px; cursor: pointer; box-shadow: 2px 2px 0 var(--shadow);
+  transition: transform .08s, box-shadow .08s;
+}
+.stepper-btn:hover:not(:disabled) { transform: translate(-1px, -1px); }
+.stepper-btn:active:not(:disabled) { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--shadow); }
+.stepper-btn:disabled { opacity: .45; cursor: not-allowed; }
+.stepper-value { font-family: 'Fraunces', serif; font-weight: 900; font-size: 26px; min-width: 2ch; text-align: center; font-variant-numeric: tabular-nums; }
+.stepper-pair { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; }
+.stepper-side { display: grid; gap: 6px; justify-items: center; }
+
+/* ---------------------------------------------------------------------------
+ * "the table's calls" expander — revealed prediction rows (hair dividers only).
+ * ------------------------------------------------------------------------ */
+.calls-table { display: grid; }
+.calls-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 2px; border-top: 1px solid var(--hair); font-size: 14px; }
+.calls-row:first-child { border-top: none; }
+.calls-score { font-family: 'Fraunces', serif; font-weight: 900; font-size: 17px; font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------------------------
+ * Leaderboard.
+ * ------------------------------------------------------------------------ */
+.lb-row { display: grid; grid-template-columns: 56px 1fr auto; align-items: center; gap: 12px; padding: 13px 8px; border-top: 1px solid var(--hair); border-radius: 14px; }
+.lb-row:first-child { border-top: none; }
+/* The signed-in user's row is "pressed on" — ink fill, paper text. */
+.lb-row.me { background: var(--ink); color: var(--card); border-top-color: transparent; }
+.lb-row.me + .lb-row { border-top-color: transparent; }
+.lb-row.me .hint { color: var(--card); opacity: .72; }
+.lb-rank-cell { display: grid; place-items: center; }
+.lb-rank { font-family: 'Fraunces', serif; font-weight: 900; font-size: 26px; font-variant-numeric: tabular-nums; }
+/* Jewel-tone badges for the top three: gold / teal / coral. */
+.lb-badge { display: inline-grid; place-items: center; width: 38px; height: 38px; border-radius: 999px; border: 1.5px solid var(--ink); box-shadow: 2px 2px 0 var(--shadow); font-family: 'Fraunces', serif; font-weight: 900; font-size: 19px; }
+.lb-badge--1 { background: #E9A23B; color: #2B2420; }
+.lb-badge--2 { background: #2A9D8F; color: #FFF7EA; }
+.lb-badge--3 { background: #E8654F; color: #FFF7EA; }
+.lb-name { font-weight: 600; }
+.lb-points { font-family: 'Fraunces', serif; font-weight: 900; font-size: 24px; font-variant-numeric: tabular-nums; text-align: right; }
+.lb-chips { display: flex; gap: 6px; margin-top: 5px; flex-wrap: wrap; }
+.mini-chip { font-size: 11px; font-weight: 700; border: 1.5px solid var(--ink); border-radius: 6px; padding: 2px 7px; background: var(--inset); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lb-row.me .mini-chip { background: transparent; color: var(--card); border-color: var(--card); }
+
+/* ---------------------------------------------------------------------------
+ * Wagers — market cards, composer & accept modals, settled ledger.
+ * ------------------------------------------------------------------------ */
+.wager-card { display: grid; gap: 10px; }
+.wager-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.wager-claim { font-family: 'Fraunces', serif; font-weight: 600; font-size: 19px; line-height: 1.25; }
+.wager-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.ledger-line { font-weight: 600; font-size: 15px; }
+.ledger-forfeit { color: var(--gold); }
+
+/* ---------------------------------------------------------------------------
+ * Modals — role="dialog", aria-modal, Escape + backdrop close (Modal.tsx).
+ * ------------------------------------------------------------------------ */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 60; background: var(--scrim);
+  display: grid; place-items: center; padding: 18px; overflow-y: auto;
+}
+.modal-panel { width: 100%; max-width: 520px; max-height: 88vh; overflow-y: auto; outline: none; }
+.modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.modal-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 22px; }
+
+/* ---------------------------------------------------------------------------
+ * Forms.
+ * ------------------------------------------------------------------------ */
+.field { display: grid; gap: 6px; }
+.field-label { font-size: 13px; font-weight: 700; color: var(--muted); }
+.form-error { font-size: 13px; font-weight: 600; color: #E8654F; }
+.input--score { width: 74px; text-align: center; font-variant-numeric: tabular-nums; }
+/* Strip the native number-input spinners (AdminView score entry) so the
+ * stamped-paper input chrome is all that shows — WebKit/Blink + Gecko. */
+.input--score::-webkit-outer-spin-button,
+.input--score::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.input--score[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+
+/* ---------------------------------------------------------------------------
+ * Empty / loading / error cards.
+ * ------------------------------------------------------------------------ */
+.empty-card { display: grid; gap: 12px; justify-items: start; }
+
+/* ---------------------------------------------------------------------------
+ * View-specific touches.
+ * ------------------------------------------------------------------------ */
+.login-hero { margin-top: 7vh; display: grid; gap: 16px; }
+.nextup { display: grid; gap: 12px; }
+.nextup-call { font-weight: 600; font-size: 14px; font-variant-numeric: tabular-nums; }
+.nextup-count { font-size: 14px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.admin-teams { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.admin-row { display: grid; gap: 12px; }
+.admin-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+/* ---------------------------------------------------------------------------
+ * Reduced motion — stillness on request.
+ * ------------------------------------------------------------------------ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

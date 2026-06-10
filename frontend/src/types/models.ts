@@ -1,162 +1,131 @@
 /**
  * models.ts
  * ----------------------------------------------------------------------------
- * TypeScript domain model for the World Cup 2026 Fantasy Hub frontend.
+ * TypeScript domain model for The Almanac Cup frontend (CONTRACT §6,
+ * "Shared API types"). Field names stay in **snake_case** so the JSON from the
+ * Node/Express server deserialises straight into these types with zero key
+ * renaming on either side.
  *
- * These interfaces mirror CONTRACT §3 (the canonical PostgreSQL schema in
- * backend/migrations/0001_init.sql) EXACTLY. Field names are kept in
- * **snake_case** so the JSON returned by the Rust/Axum backend deserialises
- * straight into these types with zero key renaming on either side.
+ * Enum string-literal unions match the PostgreSQL enums verbatim (§3):
+ *   match_status → 'scheduled' | 'live' | 'final'
+ *   wager_state  → 'PENDING' | 'ACCEPTED' | 'RESOLVED_WON' | 'RESOLVED_LOST'
+ *   wager_pick   → 'home' | 'draw' | 'away'
  *
- * Enum string literal unions match the PostgreSQL domain enums verbatim:
- *   outcome_1x2   → 'home' | 'draw' | 'away'
- *   proof_kind    → 'image' | 'video' | 'link'
- *   forfeit_state → 'pending' | 'active' | 'unsettled' | 'resolved'
- *
- * Timestamps are ISO-8601 strings (TIMESTAMPTZ serialised by the backend).
- * Any physical/time quantity in the wider app uses SI units (durations in
- * seconds, distances in km) per the project's metric mandate; these data
- * carriers themselves hold no unit-bearing numbers beyond scores/points.
+ * Timestamps are ISO-8601 UTC strings (TIMESTAMPTZ serialised by the server);
+ * the browser formats them locally via src/lib/datetime.ts. Durations anywhere
+ * in the app are metric SI seconds.
  * ----------------------------------------------------------------------------
  */
 
 /* ===========================================================================
- * Enum unions (string literals exactly matching the SQL ENUM members)
+ * Enum unions
  * ======================================================================== */
 
-/** The Bloodline forfeit lifecycle — terminal state is `resolved`. */
-export type ForfeitState = 'pending' | 'active' | 'unsettled' | 'resolved';
-
-/** 1X2 prediction outcome (home win / draw / away win). */
-export type Outcome1x2 = 'home' | 'draw' | 'away';
-
-/** Evidence medium attached to a Hall of Shame entry. */
-export type ProofKind = 'image' | 'video' | 'link';
-
-/** Fixture lifecycle status (mirrors SQL `match_status`). */
+/** Fixture lifecycle status (SQL `match_status`). 'final' only via /score. */
 export type MatchStatus = 'scheduled' | 'live' | 'final';
 
+/** Wager lifecycle (SQL `wager_state`) — from the CREATOR's perspective. */
+export type WagerState = 'PENDING' | 'ACCEPTED' | 'RESOLVED_WON' | 'RESOLVED_LOST';
+
+/** The side a wager backs (SQL `wager_pick`). */
+export type WagerPick = 'home' | 'draw' | 'away';
+
 /* ===========================================================================
- * Core entities (one interface per table in §3)
+ * Core entities
  * ======================================================================== */
 
-/** A registered player — `users` table. */
+/** A registered player — passwordless, upserted by username on login. */
 export interface User {
   id: string; // UUID
   username: string;
   display_name: string;
-  elo_rating: number; // INTEGER, seeded at 1500
-  total_points: number; // INTEGER season aggregate
-  created_at: string; // ISO-8601 TIMESTAMPTZ
+  is_admin: boolean;
+  total_points: number; // season total under the 5/2/0 scheme
+  created_at: string; // ISO-8601 TIMESTAMPTZ (UTC)
 }
 
 /** A World Cup 2026 fixture — `matches` table. */
 export interface Match {
   id: string; // UUID
-  ext_ref: string | null; // upstream feed id (nullable)
+  ext_ref: string | null; // ingest idempotency key
   home_team: string;
   away_team: string;
   group_label: string | null; // e.g. 'GROUP F'
   venue: string | null;
-  kickoff_at: string; // ISO-8601 TIMESTAMPTZ
-  /** GENERATED column: kickoff_at − 1 minute. Predictions lock at this instant. */
-  lock_at: string; // ISO-8601 TIMESTAMPTZ
+  kickoff_at: string; // ISO-8601 TIMESTAMPTZ (UTC)
+  /** GENERATED column: kickoff_at − 60 s. Predictions & wagers lock here. */
+  lock_at: string; // ISO-8601 TIMESTAMPTZ (UTC)
   status: MatchStatus;
-  home_score: number | null; // SMALLINT, NULL until played
-  away_score: number | null; // SMALLINT, NULL until played
-  created_at: string; // ISO-8601 TIMESTAMPTZ
+  home_score: number | null; // SMALLINT, NULL until scored
+  away_score: number | null; // SMALLINT, NULL until scored
+  is_featured: boolean; // the "Main Event" flag
 }
 
-/** A user's 1X2 (+ optional exact-score) call on a match — `predictions` table. */
+/** A user's exact-score call on a match — `predictions` table. */
 export interface Prediction {
   id: string; // UUID
   user_id: string; // → users.id
   match_id: string; // → matches.id
-  outcome: Outcome1x2;
-  exact_home: number | null; // SMALLINT, optional exact scoreline
-  exact_away: number | null; // SMALLINT, optional exact scoreline
-  is_locked: boolean;
-  points_awarded: number | null; // NULL until the match is settled
-  created_at: string; // ISO-8601 TIMESTAMPTZ
-  updated_at: string; // ISO-8601 TIMESTAMPTZ
+  pred_home: number; // SMALLINT 0–20
+  pred_away: number; // SMALLINT 0–20
+  points_awarded: number | null; // NULL until the match is final (then 5/2/0)
+  created_at: string; // ISO-8601 TIMESTAMPTZ (UTC)
+  updated_at: string; // ISO-8601 TIMESTAMPTZ (UTC)
 }
 
-/** A "Bloodline" wager between two friends — `forfeits` table. */
-export interface Forfeit {
-  id: string; // UUID
-  challenger_id: string; // → users.id
-  opponent_id: string; // → users.id (CHECK: ≠ challenger_id)
-  match_id: string | null; // → matches.id (nullable)
-  stake: string; // the punishment on the line
-  state: ForfeitState;
-  loser_id: string | null; // → users.id (set on settle)
-  // Lifecycle timestamps (UTC); each is NULL until its transition fires.
-  created_at: string; // ISO-8601 TIMESTAMPTZ
-  accepted_at: string | null;
-  unsettled_at: string | null;
-  resolved_at: string | null;
-  // Timeout / nudge bookkeeping (durations elsewhere are metric SI seconds).
-  nudge_count: number; // SMALLINT
-  last_nudge_at: string | null;
+/** A match joined with the caller's own prediction (when authenticated). */
+export interface MatchWithMine extends Match {
+  my_prediction: Prediction | null;
 }
 
-/**
- * A Hall of Shame proof ledger entry enriched with tribunal vote tallies.
- *
- * The base columns mirror `hall_of_shame`; `up`, `down` and `net` are the
- * aggregated thumbs-up / thumbs-down counts joined from `shame_votes`
- * (net = up − down), exposed by `GET /api/hall` per §6.
- */
-export interface HallEntry {
-  id: string; // UUID, hall_of_shame.id
-  forfeit_id: string; // → forfeits.id (UNIQUE)
-  loser_id: string; // → users.id
-  proof_url: string; // image/video/link evidence
-  proof_kind: ProofKind;
-  caption: string | null;
-  verified: boolean; // true once the tribunal passes
-  created_at: string; // ISO-8601 TIMESTAMPTZ
-  // Aggregated tribunal tallies (joined from shame_votes).
-  up: number; // count of +1 votes
-  down: number; // count of −1 votes
-  net: number; // up − down (net thumbs-up)
+/** A prediction revealed post-lock, joined with its author's identity. */
+export interface PredictionWithUser extends Prediction {
+  username: string;
+  display_name: string;
 }
 
-/* ===========================================================================
- * Derived / read-model shapes returned by aggregate endpoints (§6)
- * ======================================================================== */
-
-/** A single row in a group standings table (GET /api/standings). */
-export interface GroupStanding {
-  group_label: string; // e.g. 'GROUP F'
-  team: string; // team name
-  played: number; // matches played
-  won: number;
-  drawn: number;
-  lost: number;
-  goals_for: number;
-  goals_against: number;
-  goal_difference: number; // goals_for − goals_against
-  points: number; // 3·won + drawn (tournament points)
-}
-
-/** A single row on the season leaderboard (GET /api/leaderboard). */
+/** One row of the season leaderboard (GET /api/leaderboard, DENSE_RANK). */
 export interface LeaderboardRow {
+  rank: number;
   user_id: string; // → users.id
   username: string;
   display_name: string;
-  elo_rating: number; // Elo ranking weight
-  total_points: number; // season fantasy total
-  predictions_made: number; // predictions placed this season (matches backend)
-  rank: number; // 1-based standing position
+  total_points: number;
+  exact_hits: number; // settled predictions worth 5
+  outcome_hits: number; // settled predictions worth 2
+  predictions_settled: number; // predictions with points_awarded NOT NULL
 }
 
 /**
- * The aggregated dashboard payload returned by `GET /api/hub?user_id=:uuid`.
- * One round trip powers the entire Hub view (§6).
+ * A wager as the API serves it: the `wagers` row joined with both parties'
+ * usernames and the underlying match info (GET /api/wagers).
  */
-export interface HubPayload {
-  upcoming_matches: Match[];
-  standings: GroupStanding[];
-  active_forfeits: Forfeit[];
+export interface WagerView {
+  id: string; // UUID
+  match_id: string; // → matches.id
+  creator_id: string; // → users.id
+  acceptor_id: string | null; // → users.id, NULL while PENDING
+  pick: WagerPick;
+  margin: number | null; // "wins by ≥ N goals", 1–10, non-draw picks only
+  claim: string; // the human boast, 3–140 chars
+  forfeit: string | null; // what the loser owes; set on accept
+  state: WagerState;
+  winner_id: string | null; // set on settlement
+  loser_id: string | null; // set on settlement
+  created_at: string; // ISO-8601 TIMESTAMPTZ (UTC)
+  accepted_at: string | null;
+  resolved_at: string | null;
+  // Joined usernames for display.
+  creator_username: string;
+  acceptor_username: string | null;
+  winner_username: string | null;
+  loser_username: string | null;
+  // Joined match info.
+  home_team: string;
+  away_team: string;
+  kickoff_at: string; // ISO-8601 TIMESTAMPTZ (UTC)
+  lock_at: string; // ISO-8601 TIMESTAMPTZ (UTC)
+  match_status: MatchStatus;
+  home_score: number | null;
+  away_score: number | null;
 }

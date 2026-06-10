@@ -1,166 +1,181 @@
 /**
  * App.tsx
  * ----------------------------------------------------------------------------
- * Root application shell for the World Cup 2026 Fantasy Hub (mobile-first SPA).
+ * Root shell for The Almanac Cup (CONTRACT §7.2):
  *
- * Composition (CONTRACT §7):
- *   - <BrowserRouter> wraps the four routed views.
- *   - A sticky, thumb-reachable **bottom tab bar** with four destinations:
- *       Hub · Predict · Bloodline · Shame
- *     Each tab label is set in Anton caps; the active tab is painted in the
- *     vermillion --signal accent of the shared "Broadcast Editorial" palette.
- *   - The three display fonts are loaded once on mount via loadFonts().
+ *   <AuthProvider>
+ *     booting?          → quiet "checking the post…" card
+ *     unauthenticated?  → <LoginView/>
+ *     authenticated?    → <BrowserRouter> + routes + bottom tab bar
  *
- * Styling is self-contained: a single <style> block scoped under the `.wc-app`
- * root class, mirroring the pattern used by MatchPredictionCenter. No external
- * CSS framework. All spacing is in px/rem (documented as metric); the bottom
- * bar reserves space for the iOS home-indicator safe area.
+ * Routes: /hub · /matches · /table · /wagers (+ /admin, tab and route both
+ * gated on user.is_admin). Default and unknown paths → /hub.
+ *
+ * Theme: `data-theme` on <html>; default follows prefers-color-scheme; the
+ * header toggle persists the choice as localStorage 'almanac_theme'.
+ * Fonts (Fraunces + Hanken Grotesk) load once on mount via the idempotent
+ * loader in lib/fonts.ts.
  * ----------------------------------------------------------------------------
  */
 
-import type React from 'react';
-import { useEffect } from 'react';
-import {
-  BrowserRouter,
-  NavLink,
-  Navigate,
-  Route,
-  Routes,
-} from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { BrowserRouter, Navigate, NavLink, Route, Routes } from 'react-router-dom';
 import { loadFonts } from './lib/fonts';
-import Dashboard from './views/Dashboard';
-import PredictView from './views/PredictView';
-import BloodlineView from './views/BloodlineView';
-import HallOfShame from './views/HallOfShame';
+import { AuthProvider, useAuth } from './state/AuthContext';
+import { LoadingCard } from './components/EmptyState';
+import LoginView from './views/LoginView';
+import HubView from './views/HubView';
+import MatchesView from './views/MatchesView';
+import LeaderboardView from './views/LeaderboardView';
+import WagersView from './views/WagersView';
+import AdminView from './views/AdminView';
 
 /* ===========================================================================
- * Tab bar definition
+ * Theme handling — data-theme on <html>, persisted as 'almanac_theme'.
  * ======================================================================== */
 
-/** One bottom-tab destination. `glyph` is a decorative, aria-hidden marker. */
-interface TabDef {
-  to: string;
-  label: string;
-  glyph: string;
+type Theme = 'light' | 'dark';
+
+/** The fixed localStorage key for the persisted theme (CONTRACT §7.1). */
+const THEME_KEY = 'almanac_theme';
+
+/** Stored choice wins; otherwise defer to the OS via prefers-color-scheme. */
+function readInitialTheme(): Theme {
+  const stored = localStorage.getItem(THEME_KEY);
+  if (stored === 'light' || stored === 'dark') return stored;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
-/** The four routed destinations, left → right (§7). */
-const TABS: TabDef[] = [
-  { to: '/hub', label: 'Hub', glyph: '◧' },
-  { to: '/predict', label: 'Predict', glyph: '◈' },
-  { to: '/bloodline', label: 'Bloodline', glyph: '⚔' },
-  { to: '/shame', label: 'Shame', glyph: '☠' },
-];
-
 /* ===========================================================================
- * Component
+ * Bottom tab bar
  * ======================================================================== */
 
-export default function App(): React.ReactElement {
-  // Load the Anton / Archivo / Space Mono families once for the whole app.
-  useEffect(() => {
-    loadFonts();
-  }, []);
+/** Active tab = ink-filled "pressed on" pill (almanac.css .tab.on). */
+function tabClass({ isActive }: { isActive: boolean }): string {
+  return `tab${isActive ? ' on' : ''}`;
+}
 
+/* ===========================================================================
+ * Shell — header + auth gate + routes. Lives INSIDE AuthProvider.
+ * ======================================================================== */
+
+interface ShellProps {
+  theme: Theme;
+  onToggleTheme: () => void;
+}
+
+function Shell({ theme, onToggleTheme }: ShellProps): JSX.Element {
+  const { user, booting, logout } = useAuth();
+
+  // The shared paper header: wordmark kicker + theme toggle (+ sign out).
+  const header = (
+    <header className="apphead">
+      <span className="kicker">the almanac · wc 2026</span>
+      <div className="apphead-actions">
+        <button
+          type="button"
+          className="iconbtn"
+          aria-label={theme === 'light' ? 'switch to dark theme' : 'switch to light theme'}
+          onClick={onToggleTheme}
+        >
+          {theme === 'light' ? '☾' : '☀'}
+        </button>
+        {user && (
+          <button type="button" className="iconbtn" onClick={logout}>
+            sign out
+          </button>
+        )}
+      </div>
+    </header>
+  );
+
+  // Boot re-validation still in flight — keep the paper calm.
+  if (booting) {
+    return (
+      <div className="wrap">
+        {header}
+        <LoadingCard />
+      </div>
+    );
+  }
+
+  // No session → the front door.
+  if (!user) {
+    return (
+      <div className="wrap">
+        {header}
+        <LoginView />
+      </div>
+    );
+  }
+
+  // Signed in → the routed app with the thumb-reachable bottom tab bar.
   return (
     <BrowserRouter>
-      <div className="wc-app">
-        <style>{CSS}</style>
-
-        {/* Routed view region. Bottom padding clears the fixed tab bar. */}
-        <main className="wc-main">
-          <Routes>
-            {/* Default route → the Hub dashboard. */}
-            <Route path="/" element={<Navigate to="/hub" replace />} />
-            <Route path="/hub" element={<Dashboard />} />
-            <Route path="/predict" element={<PredictView />} />
-            <Route path="/bloodline" element={<BloodlineView />} />
-            <Route path="/shame" element={<HallOfShame />} />
-            {/* Unknown paths fall back to the Hub. */}
-            <Route path="*" element={<Navigate to="/hub" replace />} />
-          </Routes>
-        </main>
-
-        {/* ───────── Sticky bottom tab bar (thumb-reachable) ───────── */}
-        <nav className="wc-tabs" aria-label="Primary">
-          {TABS.map((tab) => (
-            <NavLink
-              key={tab.to}
-              to={tab.to}
-              className={({ isActive }) => `wc-tab${isActive ? ' is-active' : ''}`}
-            >
-              <span className="wc-tab-glyph" aria-hidden>
-                {tab.glyph}
-              </span>
-              <span className="wc-tab-label">{tab.label}</span>
-            </NavLink>
-          ))}
-        </nav>
+      <div className="wrap app-main">
+        {header}
+        <Routes>
+          <Route path="/" element={<Navigate to="/hub" replace />} />
+          <Route path="/hub" element={<HubView />} />
+          <Route path="/matches" element={<MatchesView />} />
+          <Route path="/table" element={<LeaderboardView />} />
+          <Route path="/wagers" element={<WagersView />} />
+          {/* Admin: route guard AND hidden tab — both keyed on is_admin. */}
+          <Route
+            path="/admin"
+            element={user.is_admin ? <AdminView /> : <Navigate to="/hub" replace />}
+          />
+          <Route path="*" element={<Navigate to="/hub" replace />} />
+        </Routes>
       </div>
+
+      <nav className="tabbar" aria-label="primary">
+        <NavLink to="/hub" className={tabClass}>
+          Hub
+        </NavLink>
+        <NavLink to="/matches" className={tabClass}>
+          Matches
+        </NavLink>
+        <NavLink to="/table" className={tabClass}>
+          Table
+        </NavLink>
+        <NavLink to="/wagers" className={tabClass}>
+          Wagers
+        </NavLink>
+        {user.is_admin && (
+          <NavLink to="/admin" className={tabClass}>
+            Admin
+          </NavLink>
+        )}
+      </nav>
     </BrowserRouter>
   );
 }
 
 /* ===========================================================================
- * Styles — injected once, scoped under .wc-app (Broadcast Editorial tokens).
+ * App root
  * ======================================================================== */
 
-const CSS = `
-.wc-app{
-  /* Shared "Broadcast Editorial" palette (CONTRACT §7). */
-  --paper:#f1ece0; --paper-2:#e6dfce; --ink:#0d0d0b; --ink-2:#17170f;
-  --signal:#ff3a0e; --volt:#d6ff15; --muted:#7a7060; --line:rgba(13,13,11,.16);
-  /* Height (px) reserved for the fixed bottom bar; reused as content padding. */
-  --tabbar-h:64px;
-  font-family:'Archivo',system-ui,-apple-system,sans-serif;
-  color:var(--ink); background:var(--paper);
-  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
-  min-height:100vh; min-height:100dvh; position:relative; overflow-x:hidden;
-}
-.wc-app *{ box-sizing:border-box; }
-.wc-app ::selection{ background:var(--signal); color:var(--paper); }
+export default function App(): JSX.Element {
+  // Load Fraunces + Hanken Grotesk once for the whole app.
+  useEffect(() => {
+    loadFonts();
+  }, []);
 
-/* The routed region: pad the bottom so content never hides under the tab bar
-   (bar height + the device safe-area inset). */
-.wc-main{
-  padding-bottom:calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
-  min-height:100vh; min-height:100dvh;
-}
+  // Theme state: initialised from storage / OS, mirrored onto <html> and
+  // persisted on every change.
+  const [theme, setTheme] = useState<Theme>(readInitialTheme);
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem(THEME_KEY, theme);
+  }, [theme]);
 
-/* ---- bottom tab bar ---- */
-.wc-tabs{
-  position:fixed; left:0; right:0; bottom:0; z-index:50;
-  display:grid; grid-template-columns:repeat(4,1fr);
-  height:var(--tabbar-h);
-  background:var(--ink); border-top:3px solid var(--signal);
-  /* Extend the tinted bar into the home-indicator safe area on phones. */
-  padding-bottom:env(safe-area-inset-bottom, 0px);
-  box-shadow:0 -6px 0 rgba(13,13,11,.18);
+  return (
+    <AuthProvider>
+      <Shell
+        theme={theme}
+        onToggleTheme={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
+      />
+    </AuthProvider>
+  );
 }
-.wc-tab{
-  display:flex; flex-direction:column; align-items:center; justify-content:center;
-  gap:3px; text-decoration:none; color:rgba(241,236,224,.62);
-  border-right:1px solid rgba(241,236,224,.12);
-  -webkit-tap-highlight-color:transparent; transition:color .14s,background .14s;
-}
-.wc-tab:last-child{ border-right:none; }
-.wc-tab:hover{ background:rgba(241,236,224,.05); }
-.wc-tab-glyph{ font-size:18px; line-height:1; }
-.wc-tab-label{
-  font-family:'Anton'; text-transform:uppercase; font-size:13px;
-  letter-spacing:.6px; line-height:1;
-}
-/* Active tab — vermillion signal, with a top accent bar for scannability. */
-.wc-tab.is-active{ color:var(--signal); position:relative; }
-.wc-tab.is-active::before{
-  content:''; position:absolute; top:0; left:18%; right:18%; height:4px;
-  background:var(--signal);
-}
-.wc-tab.is-active .wc-tab-glyph{ color:var(--volt); }
-
-@media (prefers-reduced-motion: reduce){
-  .wc-app *, .wc-app *::before, .wc-app *::after{
-    animation:none !important; transition:none !important;
-  }
-}
-`;

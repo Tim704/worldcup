@@ -25,7 +25,14 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# ---- Rust / backend ---------------------------------------------------------
+# ---- Node / server (Express + TS API; CONTRACT §9) --------------------------
+# `**/node_modules` above already matches, but the contract requires these two
+# explicitly: local dependency trees and tsc output never enter the context —
+# the multi-stage Dockerfile runs `npm ci` and `npm run build` itself.
+server/node_modules
+server/dist
+
+# ---- Rust / legacy backend (v1 — kept for reference, no longer built) -------
 backend/target
 **/target
 

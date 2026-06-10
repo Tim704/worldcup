@@ -1,0 +1,38 @@
+# =============================================================================
+# The Almanac Cup — repo ignore rules.
+# Dependencies, build artifacts, secrets and editor cruft never belong in git.
+# =============================================================================
+
+# ---- Node dependencies & build output (frontend/ and server/) ---------------
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.vite/
+
+# ---- Secrets / local env ----------------------------------------------------
+# .env holds the JWT APP_SECRET and DB creds — keep it local. .env.example
+# (the safe template) IS committed.
+.env
+.env.*
+!.env.example
+
+# ---- Rust (legacy backend/, no longer built) --------------------------------
+target/
+
+# ---- Python ingest (scripts/) ----------------------------------------------
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ---- Logs & runtime ---------------------------------------------------------
+*.log
+npm-debug.log*
+
+# ---- OS / editor ------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
