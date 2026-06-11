@@ -42,6 +42,7 @@ const weekdayShortFmt = new Intl.DateTimeFormat(undefined, { weekday: 'short' })
 const dayNumFmt = new Intl.DateTimeFormat(undefined, { day: 'numeric' });
 const monthShortFmt = new Intl.DateTimeFormat(undefined, { month: 'short' });
 const monthLongFmt = new Intl.DateTimeFormat(undefined, { month: 'long' });
+const monthYearFmt = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' });
 
 /**
  * Local-calendar midnight (ms since epoch) for a given instant. Built from the
@@ -119,7 +120,15 @@ export function formatCountdown(iso: string, now: Date = new Date()): string {
  * day for this user.
  */
 export function dayKey(iso: string): string {
-  const d = new Date(iso);
+  return dayKeyOf(new Date(iso));
+}
+
+/**
+ * The local-calendar "YYYY-MM-DD" key for a Date (the same shape as
+ * {@link dayKey}, but from an already-parsed Date — used by the calendar grid
+ * to key each day cell from its local components).
+ */
+export function dayKeyOf(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
@@ -165,4 +174,22 @@ export function displayState(
  */
 export function isLocked(match: { lock_at: string }, now: Date = new Date()): boolean {
   return now.getTime() >= new Date(match.lock_at).getTime();
+}
+
+/** "June 2026" — the calendar month-grid label, in the user's locale. */
+export function formatMonthYear(d: Date): string {
+  return monthYearFmt.format(d);
+}
+
+/**
+ * Short weekday headers for a MONDAY-first calendar grid, in the user's locale
+ * (e.g. ["Mon","Tue",…,"Sun"]). 2024-01-01 was a Monday, so formatting seven
+ * consecutive days from it yields the locale's short names in grid order.
+ */
+export function weekdayHeadersMonday(): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < 7; i += 1) {
+    out.push(weekdayShortFmt.format(new Date(2024, 0, 1 + i)));
+  }
+  return out;
 }
