@@ -19,14 +19,17 @@ import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { ErrorCard, LoadingCard } from '../components/EmptyState';
 import MainEventCard from '../components/MainEventCard';
+import MatchCard from '../components/MatchCard';
 import NextUpWidget from '../components/NextUpWidget';
 import WagerCard from '../components/WagerCard';
+import { displayState } from '../lib/datetime';
 import { useAuth } from '../state/AuthContext';
 import type { LeaderboardRow, MatchWithMine, WagerView } from '../types/models';
 
 /** Everything the Hub needs, gathered in one parallel round of fetches. */
 interface HubData {
   next: MatchWithMine | null;
+  live: MatchWithMine[];
   featured: MatchWithMine[];
   top3: LeaderboardRow[];
   openWagers: WagerView[];
@@ -50,9 +53,14 @@ export default function HubView(): JSX.Element {
         api.leaderboard(),
         api.listWagers({ user_id: meId }),
       ]);
+      // Live matches drop off "next up" (they're locked) — surface them in
+      // their own section instead of vanishing. Keep them out of the featured
+      // rail so a live Main Event shows once, under "live now".
+      const hubNow = new Date();
       setData({
         next: nextRes.match,
-        featured: matches.filter((m) => m.is_featured),
+        live: matches.filter((m) => displayState(m, hubNow) === 'live'),
+        featured: matches.filter((m) => m.is_featured && displayState(m, hubNow) !== 'live'),
         top3: board.slice(0, 3),
         openWagers: myWagers.filter((w) => w.state === 'PENDING' || w.state === 'ACCEPTED'),
       });
@@ -94,6 +102,19 @@ export default function HubView(): JSX.Element {
     <div>
       <span className="kicker">today&rsquo;s edition</span>
       <h1 className="view-title">the front page</h1>
+
+      {/* 0 — live right now: matches that have kicked off but aren't final.
+            (They drop off "next up" the moment they lock.) */}
+      {data.live.length > 0 && (
+        <section className="section">
+          <span className="kicker">live now</span>
+          <div className="stack">
+            {data.live.map((m) => (
+              <MatchCard key={m.id} match={m} onSaved={() => void load()} />
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* 1 — the actionable prompt. Keyed by match id so a new "next" match
             remounts the widget with fresh stepper state. */}
