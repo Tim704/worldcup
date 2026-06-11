@@ -71,6 +71,26 @@ export interface LeaderboardRow {
   predictions_settled: number; // predictions with points_awarded NOT NULL
 }
 
+/** group_picks: per group letter (A–L), predicted finishing order (index 0 = winner). */
+export type BracketGroupPicks = Record<string, string[]>;
+
+/** third_picks: up to 8 group letters whose 3rd-placed team takes a best-third berth. */
+export type BracketThirdPicks = string[];
+
+/** bracket_picks: picked winner per knockout slot, keyed by FIFA match number ('M73'…'M104'). */
+export type BracketSlotPicks = Record<string, string>;
+
+/** A user's whole-tournament prophecy — `bracket_predictions` table (Contract §11). */
+export interface BracketPrediction {
+  id: string;
+  user_id: string;
+  group_picks: BracketGroupPicks;
+  third_picks: BracketThirdPicks;
+  bracket_picks: BracketSlotPicks;
+  created_at: string; // ISO-8601 UTC
+  updated_at: string; // ISO-8601 UTC
+}
+
 /** Wager joined with usernames + match info — the marketplace view. */
 export interface WagerView {
   id: string;
@@ -184,6 +204,23 @@ export function mapLeaderboardRow(r: SqlRow): LeaderboardRow {
     exact_hits: Number(r.exact_hits),
     outcome_hits: Number(r.outcome_hits),
     predictions_settled: Number(r.predictions_settled),
+  };
+}
+
+/**
+ * bracket_predictions row → BracketPrediction. `pg` already parses JSONB
+ * columns into plain JS values, so the documents pass straight through —
+ * their shape was enforced on the way IN by lib/bracketPicks.ts.
+ */
+export function mapBracketPredictionRow(r: SqlRow): BracketPrediction {
+  return {
+    id: r.id,
+    user_id: r.user_id,
+    group_picks: r.group_picks as BracketGroupPicks,
+    third_picks: r.third_picks as BracketThirdPicks,
+    bracket_picks: r.bracket_picks as BracketSlotPicks,
+    created_at: iso(r.created_at),
+    updated_at: iso(r.updated_at),
   };
 }
 

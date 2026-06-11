@@ -8,8 +8,8 @@
  *     unauthenticated?  → <LoginView/>
  *     authenticated?    → <BrowserRouter> + routes + bottom tab bar
  *
- * Routes: /hub · /matches · /table · /wagers (+ /admin, tab and route both
- * gated on user.is_admin). Default and unknown paths → /hub.
+ * Routes: /hub · /matches · /bracket · /table · /wagers (+ /admin, tab and
+ * route both gated on user.is_admin). Default and unknown paths → /hub.
  *
  * Theme: `data-theme` on <html>; default follows prefers-color-scheme; the
  * header toggle persists the choice as localStorage 'almanac_theme'.
@@ -26,6 +26,7 @@ import { LoadingCard } from './components/EmptyState';
 import LoginView from './views/LoginView';
 import HubView from './views/HubView';
 import MatchesView from './views/MatchesView';
+import BracketView from './views/BracketView';
 import LeaderboardView from './views/LeaderboardView';
 import WagersView from './views/WagersView';
 import AdminView from './views/AdminView';
@@ -70,7 +71,7 @@ function Shell({ theme, onToggleTheme }: ShellProps): JSX.Element {
   // The shared paper header: wordmark kicker + theme toggle (+ sign out).
   const header = (
     <header className="apphead">
-      <span className="kicker">the almanac · wc 2026</span>
+      <span className="kicker">world cup 2026</span>
       <div className="apphead-actions">
         <button
           type="button"
@@ -118,6 +119,7 @@ function Shell({ theme, onToggleTheme }: ShellProps): JSX.Element {
           <Route path="/" element={<Navigate to="/hub" replace />} />
           <Route path="/hub" element={<HubView />} />
           <Route path="/matches" element={<MatchesView />} />
+          <Route path="/bracket" element={<BracketView />} />
           <Route path="/table" element={<LeaderboardView />} />
           <Route path="/wagers" element={<WagersView />} />
           {/* Admin: route guard AND hidden tab — both keyed on is_admin. */}
@@ -135,6 +137,9 @@ function Shell({ theme, onToggleTheme }: ShellProps): JSX.Element {
         </NavLink>
         <NavLink to="/matches" className={tabClass}>
           Matches
+        </NavLink>
+        <NavLink to="/bracket" className={tabClass}>
+          Bracket
         </NavLink>
         <NavLink to="/table" className={tabClass}>
           Table

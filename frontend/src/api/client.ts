@@ -20,6 +20,11 @@
  */
 
 import type {
+  BracketGroupPicks,
+  BracketOfUser,
+  BracketPrediction,
+  BracketSlotPicks,
+  BracketThirdPicks,
   LeaderboardRow,
   Match,
   MatchStatus,
@@ -216,6 +221,31 @@ export const api = {
   /** GET /api/predictions/mine (auth) → all of my predictions. */
   myPredictions(): Promise<Prediction[]> {
     return request('/predictions/mine');
+  },
+
+  /** GET /api/bracket (auth) → { bracket } — my prophecy, null when none yet. */
+  getBracket(): Promise<{ bracket: BracketPrediction | null }> {
+    return request('/bracket');
+  },
+
+  /**
+   * GET /api/bracket/:userId (auth) → { user, bracket } — browse another
+   * player's tree (read-only; their `bracket` is null when none on file).
+   */
+  getUserBracket(userId: string): Promise<BracketOfUser> {
+    return request(`/bracket/${userId}`);
+  },
+
+  /**
+   * POST /api/bracket (auth) {group_picks, third_picks, bracket_picks} →
+   * the upserted BracketPrediction (one prophecy per user, replaced whole).
+   */
+  saveBracket(input: {
+    group_picks: BracketGroupPicks;
+    third_picks: BracketThirdPicks;
+    bracket_picks: BracketSlotPicks;
+  }): Promise<BracketPrediction> {
+    return request('/bracket', { method: 'POST', body: input });
   },
 
   /** GET /api/leaderboard → ranked season table (DENSE_RANK, one query). */

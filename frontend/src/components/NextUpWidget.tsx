@@ -21,6 +21,7 @@ import { api, ApiError } from '../api/client';
 import { formatCountdown, formatKickoff, isLocked } from '../lib/datetime';
 import type { MatchWithMine, Prediction } from '../types/models';
 import ScoreStepper from './ScoreStepper';
+import TableCalls from './TableCalls';
 
 interface NextUpWidgetProps {
   /** The next unlocked match, or null when the calendar is empty. */
@@ -60,7 +61,7 @@ export default function NextUpWidget({ match, onSaved }: NextUpWidgetProps): JSX
     return (
       <section className="card nextup">
         <span className="kicker">next up</span>
-        <p className="hint">nothing to call. the almanac rests.</p>
+        <p className="hint">nothing to call. the tournament rests.</p>
       </section>
     );
   }
@@ -147,6 +148,14 @@ export default function NextUpWidget({ match, onSaved }: NextUpWidgetProps): JSX
           your call: {match.home_team} {mine.pred_home} – {mine.pred_away} {match.away_team}
         </p>
       )}
+
+      {/* Once I've called it, peek at the table (commit-to-reveal). */}
+      <TableCalls
+        matchId={match.id}
+        revealed={locked || mine !== null}
+        final={false}
+        live={!locked}
+      />
 
       {/* Live countdown line — "kicks off in 2 h 05 min" / "in 3 days" / "locked". */}
       <p className="nextup-count">{formatCountdown(match.kickoff_at, now)}</p>

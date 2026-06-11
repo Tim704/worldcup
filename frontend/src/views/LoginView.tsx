@@ -46,8 +46,8 @@ export default function LoginView(): JSX.Element {
 
   return (
     <div className="login-hero">
-      <span className="kicker">the almanac · wc 2026</span>
-      <h1 className="title">the almanac cup</h1>
+      <span className="kicker">world cup 2026</span>
+      <h1 className="title">world cup 2026</h1>
       <p className="sub">
         forty-eight teams, one season ledger. call every score, post your boasts, and let the
         table keep the receipts.

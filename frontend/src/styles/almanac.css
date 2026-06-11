@@ -70,7 +70,7 @@
  * Base classes — verbatim from CONTRACT §7.1, then extended further below.
  * ------------------------------------------------------------------------ */
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: 'Hanken Grotesk', sans-serif; color: var(--ink); min-height: 100vh; padding: 28px 18px 60px; }
+body { font-family: 'Hanken Grotesk', sans-serif; color: var(--ink); min-height: 100vh; padding: 28px 18px 60px; overflow-x: hidden; }
 .wrap { max-width: 760px; margin: 0 auto; }
 .kicker { font-size: 12px; letter-spacing: .28em; text-transform: uppercase; font-weight: 700; color: var(--gold); }
 .title { font-family: 'Fraunces', serif; font-weight: 900; line-height: .95; font-size: clamp(38px, 9vw, 68px); letter-spacing: -.02em; }
@@ -277,6 +277,8 @@ select.input {
 .calls-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 2px; border-top: 1px solid var(--hair); font-size: 14px; }
 .calls-row:first-child { border-top: none; }
 .calls-score { font-family: 'Fraunces', serif; font-weight: 900; font-size: 17px; font-variant-numeric: tabular-nums; }
+/* Commit-to-reveal nudge shown under an upcoming match before you've called it. */
+.calls-shut { margin-top: 6px; }
 
 /* ---------------------------------------------------------------------------
  * Leaderboard.
@@ -349,6 +351,142 @@ select.input {
 .admin-teams { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
 .admin-row { display: grid; gap: 12px; }
 .admin-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+/* ---------------------------------------------------------------------------
+ * Tournament Predictor (Contract §11) — group grid, tap-to-rank team rows,
+ * best-thirds chips, knockout rail. Tokens only: every colour is a var() or
+ * a jewel tone already in the palette; 1.5px ink borders; hard offset
+ * shadows; the press interaction on every tappable surface.
+ * ------------------------------------------------------------------------ */
+
+/* Six tabs since the bracket joined — let the bar scroll on narrow phones.
+ * Auto-margins on the end tabs re-centre the row whenever there IS room
+ * (plain justify-content: center would clip the leading tabs on overflow). */
+.tabbar { overflow-x: auto; justify-content: flex-start; }
+.tab:first-child { margin-left: auto; }
+.tab:last-child { margin-right: auto; }
+
+/* Groups A–L: two columns on the 760px wrap, one column on phones. */
+.group-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 16px; }
+.group-card { display: grid; gap: 8px; padding: 16px; align-content: start; }
+.group-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+
+/* A team as a tappable paper row: flag + name + rank dot + status pill. */
+.team-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  font: inherit; text-align: left; color: var(--ink);
+  background: var(--card); border: 1.5px solid var(--ink); border-radius: 12px;
+  padding: 9px 12px; box-shadow: 2px 2px 0 var(--shadow);
+  transition: transform .08s, box-shadow .08s;
+}
+button.team-row { cursor: pointer; }
+button.team-row:hover:not(:disabled) { transform: translate(-1px, -1px); }
+button.team-row:active:not(:disabled) { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--shadow); }
+button.team-row:disabled { cursor: not-allowed; opacity: .6; transform: none; }
+/* Picked = gold-stamped, the same fill grammar as .btn. */
+.team-row.on { background: var(--accent); color: #2B2420; }
+/* Undecided slot: quiet inset paper, dashed edge, italic placeholder. */
+.team-row--tbd { background: var(--inset); box-shadow: none; border-style: dashed; }
+.team-row--tbd .team-row-name { color: var(--muted2); font-style: italic; font-weight: 400; font-size: 14px; }
+/* Eliminated side of a decided knockout tie: struck through and faded. */
+.team-row--out { opacity: .6; box-shadow: none; }
+.team-row--out .team-row-name { text-decoration: line-through; color: var(--muted2); font-weight: 400; }
+
+.team-flag { font-size: 18px; line-height: 1; flex: none; }
+.team-row-name { font-family: 'Fraunces', serif; font-weight: 600; font-size: 16px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.team-row .statechip { box-shadow: none; } /* one shadow per row — keep it calm */
+
+/* Finishing-position dot; gold fill for the two advancing places. */
+.rank-dot {
+  display: inline-grid; place-items: center; flex: none;
+  width: 26px; height: 26px; border-radius: 999px;
+  border: 1.5px solid var(--ink); background: var(--inset);
+  font-family: 'Fraunces', serif; font-weight: 900; font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.rank-dot--in { background: var(--accent); color: #2B2420; }
+
+/* Best-thirds picker chips. */
+.thirds-chips { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* The knockout bracket: a real two-sided tree on an explicit CSS grid. Nine
+ * columns — R32 R16 QF SF · FINAL · SF QF R16 R32 — over 16 row-units, with
+ * each tie row-SPANNING so it lands exactly centred between the two it feeds
+ * from (so overlap is impossible by construction, unlike a flex funnel). The
+ * connector lines are drawn per cell with pseudo-element borders; the two lines
+ * into the final glow gold. It scrolls horizontally when it can't fit, and
+ * breaks out of the 760px reading column to full width from 760px up. */
+.bracket-scroll { overflow-x: auto; padding: 2px 2px 14px; }
+@media (min-width: 760px) {
+  .bracket-scroll { margin-left: calc(50% - 50vw); margin-right: calc(50% - 50vw); padding-left: 24px; padding-right: 24px; }
+}
+
+.bracket-grid {
+  --bk-row: 68px;            /* one row-unit; an R32 tie spans two of these */
+  --bk-gap: 30px;           /* column gap = full connector reach (semis→final) */
+  --bk-arm: 15px;           /* half-gap: child arm and parent stub meet mid-gap */
+  --bk-line: var(--hair2);  /* connector ink — themed, subtle */
+  display: grid;
+  grid-template-columns: repeat(8, minmax(116px, 1fr));
+  grid-template-rows: auto repeat(16, var(--bk-row));
+  column-gap: var(--bk-gap); row-gap: 0;
+}
+
+/* Column headers (row 1). */
+.bk-head { display: grid; justify-items: center; align-content: start; gap: 2px; text-align: center; padding-bottom: 8px; }
+.bk-count { font-size: 11px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* A cell fills its row-spanned grid area and centres its card; the connectors
+ * are positioned against the FULL cell, so their percentages map onto the span
+ * — which is exactly what lines every tie up with the pair feeding it. */
+.bk-cell { position: relative; display: grid; align-content: center; }
+
+/* One knockout tie: a small paper panel holding two team rows. */
+.bracket-match { position: relative; display: grid; gap: 7px; background: var(--card); border: 1.5px solid var(--ink); border-radius: 14px; padding: 8px 9px; box-shadow: 3px 3px 0 var(--shadow); }
+.bracket-match--decided { border-left-width: 4px; border-left-color: var(--accent); }
+.bracket-grid .team-row { padding: 6px 9px; gap: 8px; }
+.bracket-grid .team-row-name { font-size: 13.5px; }
+
+/* — connector lines —
+ * child → parent: a horizontal arm to mid-gap plus half the vertical bus (the
+ * upper child's bus runs down to the pair boundary, the lower child's runs up,
+ * so together they bridge the two centres). Paired rounds R32/R16/QF only. */
+.bk-cell::before, .bk-cell::after { content: ''; position: absolute; }
+.bk-left.bk-child::after   { left: 100%;  width: var(--bk-arm); border-right: 2px solid var(--bk-line); }
+.bk-left.bk-child.bk-up::after   { top: 50%; height: 50%; border-top: 2px solid var(--bk-line); }
+.bk-left.bk-child.bk-down::after { top: 0;   height: 50%; border-bottom: 2px solid var(--bk-line); }
+.bk-right.bk-child::before  { right: 100%; width: var(--bk-arm); border-left: 2px solid var(--bk-line); }
+.bk-right.bk-child.bk-up::before   { top: 50%; height: 50%; border-top: 2px solid var(--bk-line); }
+.bk-right.bk-child.bk-down::before { top: 0;   height: 50%; border-bottom: 2px solid var(--bk-line); }
+/* parent → bus: a short horizontal stub from the card centre to the bus. */
+.bk-left.bk-parent::before  { right: 100%; top: 50%; width: var(--bk-arm); border-top: 2px solid var(--bk-line); }
+.bk-right.bk-parent::after  { left: 100%;  top: 50%; width: var(--bk-arm); border-top: 2px solid var(--bk-line); }
+
+/* The final crowns the two middle semis from ABOVE: its card sits at the top of
+ * the centre span (columns 4–5) and a ⊓ connector drops onto both semi-finals.
+ * The connector is a real element filling the leftover height, so it needs no
+ * pixel coupling: side margins set the two legs over the semi-card centres, the
+ * top border is the bus under the card, and margin-bottom stops the legs at the
+ * semi-card tops. Same gray ink as every other connector — no glow. */
+.bk-finalcell { position: relative; display: grid; grid-template-rows: auto auto 1fr; }
+.bk-final-label { text-align: center; margin-bottom: 4px; }
+.bk-final-conn {
+  margin: 6px 25% 50px;
+  border: 2px solid var(--bk-line);
+  border-bottom: 0;
+  border-radius: 5px 5px 0 0;
+}
+
+/* The crowned-champion hero above the rail. */
+.champion-card { display: grid; gap: 8px; justify-items: center; text-align: center; margin-bottom: 18px; border-width: 2px; }
+.champion-trophy { font-size: clamp(34px, 9vw, 56px); line-height: 1; }
+.champion-name { font-family: 'Fraunces', serif; font-weight: 900; font-size: clamp(30px, 7vw, 44px); letter-spacing: -.02em; line-height: 1.02; }
+
+/* Save bar above the predictor. */
+.savebar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+
+/* The "whose prophecy" people picker sits tight under the title. */
+.predictor-people { margin-bottom: 12px; }
 
 /* ---------------------------------------------------------------------------
  * Reduced motion — stillness on request.

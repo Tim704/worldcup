@@ -96,6 +96,43 @@ export interface LeaderboardRow {
   predictions_settled: number; // predictions with points_awarded NOT NULL
 }
 
+/* ===========================================================================
+ * Tournament Predictor (Contract §11)
+ * ======================================================================== */
+
+/** group_picks: per group letter (A–L), predicted finishing order (index 0 = winner). */
+export type BracketGroupPicks = Record<string, string[]>;
+
+/** third_picks: up to 8 group letters whose 3rd-placed team takes a best-third berth. */
+export type BracketThirdPicks = string[];
+
+/** bracket_picks: picked winner per knockout slot, keyed by FIFA match number ('M73'…'M104'). */
+export type BracketSlotPicks = Record<string, string>;
+
+/** A user's whole-tournament prophecy — `bracket_predictions` table. */
+export interface BracketPrediction {
+  id: string; // UUID
+  user_id: string; // → users.id
+  group_picks: BracketGroupPicks;
+  third_picks: BracketThirdPicks;
+  bracket_picks: BracketSlotPicks;
+  created_at: string; // ISO-8601 TIMESTAMPTZ (UTC)
+  updated_at: string; // ISO-8601 TIMESTAMPTZ (UTC)
+}
+
+/** A lightweight public identity (no points/admin) — used when browsing brackets. */
+export interface PublicUser {
+  id: string; // UUID
+  username: string;
+  display_name: string;
+}
+
+/** GET /api/bracket/:userId — a player plus their prophecy (null when none on file). */
+export interface BracketOfUser {
+  user: PublicUser;
+  bracket: BracketPrediction | null;
+}
+
 /**
  * A wager as the API serves it: the `wagers` row joined with both parties'
  * usernames and the underlying match info (GET /api/wagers).

@@ -24,9 +24,11 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../api/client';
 import { displayState, formatKickoff, isLocked } from '../lib/datetime';
-import type { MatchWithMine, Prediction, PredictionWithUser } from '../types/models';
+import type { MatchWithMine, Prediction } from '../types/models';
+import PointsBadge from './PointsBadge';
 import ScoreStepper from './ScoreStepper';
 import StateChip from './StateChip';
+import TableCalls from './TableCalls';
 
 interface MatchCardProps {
   match: MatchWithMine;
@@ -34,14 +36,6 @@ interface MatchCardProps {
   hero?: boolean;
   /** Bubbled after a successful save so parents can quietly refresh. */
   onSaved?: (prediction: Prediction) => void;
-}
-
-/** The 5/2/0 points badge shown on final cards (null until settlement). */
-function PointsBadge({ points }: { points: number | null }): JSX.Element | null {
-  if (points === null) return null;
-  if (points === 5) return <span className="points-badge points-badge--exact">+5 exact</span>;
-  if (points === 2) return <span className="points-badge points-badge--outcome">+2 outcome</span>;
-  return <span className="points-badge points-badge--zero">0</span>;
 }
 
 export default function MatchCard({ match, hero = false, onSaved }: MatchCardProps): JSX.Element {
@@ -93,30 +87,6 @@ export default function MatchCard({ match, hero = false, onSaved }: MatchCardPro
     } finally {
       setSaving(false);
     }
-  }
-
-  // -- "the table's calls" expander ------------------------------------------
-  const [callsOpen, setCallsOpen] = useState<boolean>(false);
-  const [calls, setCalls] = useState<PredictionWithUser[] | null>(null);
-  const [callsErr, setCallsErr] = useState<boolean>(false);
-  const [callsLoading, setCallsLoading] = useState<boolean>(false);
-
-  async function loadCalls(): Promise<void> {
-    setCallsLoading(true);
-    setCallsErr(false);
-    try {
-      setCalls(await api.matchPredictions(match.id));
-    } catch {
-      setCallsErr(true);
-    } finally {
-      setCallsLoading(false);
-    }
-  }
-
-  function toggleCalls(): void {
-    const next = !callsOpen;
-    setCallsOpen(next);
-    if (next && calls === null && !callsLoading) void loadCalls();
   }
 
   // -- render -----------------------------------------------------------------
@@ -191,48 +161,14 @@ export default function MatchCard({ match, hero = false, onSaved }: MatchCardPro
         </div>
       )}
 
-      {/* Revealed table calls — only offered after lock (server enforces). */}
-      {locked && (
-        <div>
-          <button
-            type="button"
-            className={`chip chip--small${callsOpen ? ' on' : ''}`}
-            aria-expanded={callsOpen}
-            onClick={toggleCalls}
-          >
-            the table&rsquo;s calls
-          </button>
-          {callsOpen && (
-            <div className="calls-table">
-              {callsLoading && <p className="hint calls-row">checking the post…</p>}
-              {callsErr && (
-                <p className="hint calls-row">
-                  the wire is down.{' '}
-                  <button type="button" className="chip chip--small" onClick={() => void loadCalls()}>
-                    try again
-                  </button>
-                </p>
-              )}
-              {calls !== null && calls.length === 0 && (
-                <p className="hint calls-row">nobody called this one.</p>
-              )}
-              {calls?.map((c) => (
-                <div key={c.id} className="calls-row">
-                  <span>
-                    {c.display_name} <span className="hint">@{c.username}</span>
-                  </span>
-                  <span className="row">
-                    <span className="calls-score">
-                      {c.pred_home} – {c.pred_away}
-                    </span>
-                    {state === 'final' && <PointsBadge points={c.points_awarded} />}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      {/* The table's calls — commit-to-reveal: open once the match locks or
+          once I've made my own call. Before that TableCalls shows the nudge. */}
+      <TableCalls
+        matchId={match.id}
+        revealed={locked || mine !== null}
+        final={state === 'final'}
+        live={!locked}
+      />
     </article>
   );
 }

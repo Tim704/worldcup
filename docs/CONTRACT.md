@@ -257,7 +257,7 @@ GET  /api/auth/me              (auth)     → User
 GET  /api/matches              (opt auth) → MatchWithMine[]  kickoff_at ASC; my_prediction joined when authed
 GET  /api/matches/next         (opt auth) → { match: MatchWithMine | null }    first match with lock_at > now
 GET  /api/matches/:id          (opt auth) → MatchWithMine
-GET  /api/matches/:id/predictions         → PredictionWithUser[]  ONLY once now ≥ lock_at (else 409 MATCH_LOCKED — picks are secret until lock)
+GET  /api/matches/:id/predictions (opt auth) → PredictionWithUser[]  commit-to-reveal: once now ≥ lock_at (anyone) OR caller has saved their own call for it; else 409 MATCH_LOCKED
 
 POST /api/predictions          (auth)     {match_id, pred_home, pred_away} → Prediction
                                            upsert on (user_id, match_id); 409 MATCH_LOCKED when now ≥ lock_at; scores 0–20
@@ -497,9 +497,12 @@ Server times are UTC ISO strings; format in the BROWSER's local timezone via
   local time via `formatKickoff`, StateChip, my prediction (or stepper until
   lock), final score in Fraunces 900 with my earned points badge (`+5 exact` /
   `+2 outcome` / `0`) once final.
-- **Predictions privacy:** others' predictions visible per match only after
-  lock (server enforces; UI offers a "the table's calls" expander on locked/
-  final cards).
+- **Predictions privacy (commit-to-reveal):** others' predictions for a match
+  become visible once it locks OR once the caller has saved their own call for
+  it (server enforces; UI offers a "the table's calls" expander whenever it is
+  revealable — pre-lock once you've predicted, plus all locked/final cards). A
+  pre-lock peek carries a "still moving" note since calls remain editable until
+  kickoff.
 - **Leaderboard:** rank numerals Fraunces 900; chips for exact/outcome hit
   counts; the signed-in user's row ink-filled ("pressed on"); top three get
   jewel-tone rank badges (gold/teal/coral).
@@ -568,3 +571,126 @@ TypeScript strict on both sides; no `any` unless quarantined at the SQL
 boundary with a typed cast. One shared pool, parameterised SQL only, no N+1.
 Frontend: function components + hooks only; fetch through `api/client.ts`;
 all visible copy follows §7 voice.
+
+## 11. Tournament Predictor (v2.1 extension)
+
+A per-user whole-tournament prediction: the group stage called group by group,
+then an interactive knockout tree from the round of 32 down to the champion.
+Everything below follows the v2 conventions in §2–§10 (snake_case wire fields,
+parameterised SQL, one pool, error envelope, Warm Almanac tokens only).
+
+### 11.1 Schema — `server/migrations/0002_bracket_predictions.sql` (reversible)
+
+```sql
+CREATE TABLE bracket_predictions (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id       UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    group_picks   JSONB       NOT NULL DEFAULT '{}'::jsonb
+                  CHECK (jsonb_typeof(group_picks) = 'object'),
+    third_picks   JSONB       NOT NULL DEFAULT '[]'::jsonb
+                  CHECK (jsonb_typeof(third_picks) = 'array'),
+    bracket_picks JSONB       NOT NULL DEFAULT '{}'::jsonb
+                  CHECK (jsonb_typeof(bracket_picks) = 'object'),
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT bracket_predictions_one_per_user UNIQUE (user_id)
+);
+```
+
+The prophecy is ONE document per user, replaced atomically (it is internally
+interdependent — a group re-order cascades through the knockout tree).
+Down-migration: `0002_bracket_predictions.down.sql` drops the table.
+
+### 11.2 Document shapes (validated by `server/src/lib/bracketPicks.ts`)
+
+- `group_picks` — `{ "A": ["Mexico", …], … }`: per group letter (A–L), the
+  predicted finishing order; index 0 = group winner; ≤ 4 distinct trimmed
+  team names (1–60 chars); PARTIAL orders are legal.
+- `third_picks` — `[ "A", "C", … ]`: ≤ 8 distinct group letters whose
+  3rd-placed team takes a best-third berth (letters, not names, so a group
+  re-order re-points the pick automatically).
+- `bracket_picks` — `{ "M74": "Mexico", … }`: picked winner per knockout
+  slot, keyed by FIFA match number `M73`–`M102`, `M104` (M103, the
+  third-place match, is not part of the predictor).
+
+Team names are NOT cross-checked against `matches` (the document is
+self-referential and a user can only corrupt their own prophecy).
+
+### 11.3 Routes — `server/src/routes/bracket.ts`, mounted at `/api/bracket`
+
+| method · path             | auth | body                                          | →                                        |
+|---------------------------|------|-----------------------------------------------|------------------------------------------|
+| GET  `/api/bracket`         | yes  | —                                             | `{ bracket: BracketPrediction \| null }`  |
+| GET  `/api/bracket/:userId` | yes  | —                                             | `{ user, bracket: BracketPrediction \| null }` — browse another player's tree (read-only); 404 on unknown player |
+| POST `/api/bracket`         | yes  | `{ group_picks, third_picks, bracket_picks }` | upserted `BracketPrediction`              |
+
+No lock guard: the bracket is a season-long living document. Upsert is a
+single `INSERT … ON CONFLICT (user_id) DO UPDATE` statement; all three JSONB
+params are `JSON.stringify`-ed and cast `::jsonb` (a bare JS array would be
+encoded as a Postgres array literal otherwise).
+
+### 11.4 Shared API type (both `server/src/types.ts` & `frontend/src/types/models.ts`)
+
+```ts
+export type BracketGroupPicks = Record<string, string[]>;
+export type BracketThirdPicks = string[];
+export type BracketSlotPicks  = Record<string, string>;
+
+export interface BracketPrediction {
+  id: string;
+  user_id: string;
+  group_picks: BracketGroupPicks;
+  third_picks: BracketThirdPicks;
+  bracket_picks: BracketSlotPicks;
+  created_at: string; // ISO-8601 UTC
+  updated_at: string; // ISO-8601 UTC
+}
+```
+
+### 11.5 Frontend — route `/bracket`, tab "Bracket"
+
+- `views/BracketView.tsx` — two lenses ("group stage" | "knockout"), explicit
+  save with dirty flag, one parallel fetch on mount (matches + my bracket +
+  leaderboard), no polling. A "whose prophecy" people picker (from the
+  leaderboard) flips the whole view between MY editable picks and any other
+  player's READ-ONLY tree (`GET /api/bracket/:userId`); the knockout lens is a
+  real two-sided bracket — eight flow columns (`R32 R16 QF SF · SF QF R16 R32`)
+  on an explicit CSS grid, each tie row-SPANS so it sits centred between the two
+  it feeds from, with gray pseudo-element connector lines. The FINAL is lifted
+  out and crowns the two middle semi-finals from ABOVE (a `⊓` connector drops
+  onto both). It breaks out to full viewport width and scrolls when it can't
+  fit, above a champion hero naming the losing finalist.
+- `lib/bracket.ts` — the engine: the OFFICIAL FIFA WC2026 knockout chart
+  (matches 73–104), `groupsFromMatches` (groups derive from the live
+  `/api/matches` feed, never hardcoded), `assignThirdBerths` (maximum
+  bipartite matching of picked thirds onto the 8 conditional berth slots),
+  `resolveBracket` (one forward pass; prunes every pick whose premise died —
+  the "reset the downstream branch" behaviour), `bracketColumns` (splits the
+  resolved tree into the left/right halves — by the semi-final each feeds —
+  that converge on the centred final). Slot-key set mirrors
+  `server/src/lib/bracketPicks.ts` — keep in sync.
+- `lib/flags.ts` — team name → flag emoji, graceful null fallback.
+- Components: `TeamRow` (flag + name + rank dot + jewel status pill; `selected`
+  gold fill, `muted` strike-through for an eliminated side), `GroupCard`
+  (tap-to-rank), `BracketMatchup` (tap-to-advance). All three accept a
+  `readOnly` flag (withhold taps) so the same pure components render another
+  player's tree.
+- CSS: the "Tournament Predictor" block in `almanac.css` — tokens only; classes
+  `.group-grid .group-card .group-head .team-row .team-flag .team-row-name
+  .team-row--out .rank-dot .thirds-chips .predictor-people .bracket-scroll
+  .bracket-grid .bk-head .bk-count .bk-cell (.bk-left/.bk-right,
+  .bk-child/.bk-parent, .bk-up/.bk-down) .bk-finalcell .bk-final-label
+  .bk-final-conn .bracket-match .bracket-match--decided .champion-card
+  .champion-trophy .champion-name .savebar`. `.bracket-grid` is 8 columns ×
+  `auto repeat(16, --bk-row)`; ties place via inline `grid-column`/`grid-row …
+  / span N` (N doubling per round) so feeders' centres straddle their parent
+  exactly; connectors are `.bk-cell` pseudo-element borders (gray `--bk-line`).
+  `.bk-finalcell` spans the two middle columns above the semis, its
+  `.bk-final-conn` a `⊓` of `--bk-line`. `.bracket-scroll` full-bleeds out of
+  the 760px column from 760px up (with `body { overflow-x: hidden }`) and
+  scrolls horizontally when the tree can't fit. `.tabbar` scrolls (six tabs).
+
+### 11.6 Scoring
+
+Out of scope for v2.1 — the prophecy is bragging rights only. A future
+settlement would follow §4's pattern (pure function + one transaction).

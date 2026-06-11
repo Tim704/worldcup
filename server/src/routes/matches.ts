@@ -4,9 +4,12 @@
  *   GET /api/matches                  (opt auth) → MatchWithMine[]  kickoff_at ASC
  *   GET /api/matches/next             (opt auth) → { match: MatchWithMine | null }
  *   GET /api/matches/:id              (opt auth) → MatchWithMine
- *   GET /api/matches/:id/predictions             → PredictionWithUser[]
- *                                       ONLY once now ≥ lock_at — picks are
- *                                       secret until lock (else 409 MATCH_LOCKED)
+ *   GET /api/matches/:id/predictions  (opt auth) → PredictionWithUser[]
+ *                                       commit-to-reveal: open once the match
+ *                                       LOCKS (now ≥ lock_at) OR once the caller
+ *                                       has saved their own call for it; else
+ *                                       409 MATCH_LOCKED. You show your hand to
+ *                                       see the table's.
  *
  * `my_prediction` is joined in the same query when a valid token is present
  * (LEFT JOIN on user_id — binds NULL for anonymous callers, so the join
@@ -116,12 +119,19 @@ router.get(
 
 /**
  * GET /api/matches/:id/predictions — everyone's calls for one match.
- * Picks are SECRET until lock: before lock_at this is 409 MATCH_LOCKED.
- * The lock comparison uses the DATABASE clock (now() ≥ lock_at) so the
- * privacy boundary is exactly the same one the prediction-upsert guard uses.
+ *
+ * Commit-to-reveal privacy: the table's calls open up when the match LOCKS
+ * (now ≥ lock_at — anyone, even anonymous, as before) OR when the caller has
+ * already committed their own call for this match. The second clause is why
+ * this route now takes optionalAuth: an authenticated caller who has predicted
+ * may peek before kickoff, but only after showing their own hand — which blunts
+ * copy-the-leader (you cannot freeload on the field without first betting). The
+ * lock comparison uses the DATABASE clock so the boundary matches every other
+ * guard. Anonymous / not-yet-predicted callers get 409 until lock.
  */
 router.get(
   '/:id/predictions',
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const matchId = vUuid(req.params.id, 'match id');
 
@@ -131,8 +141,22 @@ router.get(
     );
     const m = match.rows[0];
     if (!m) throw new AppError('NOT_FOUND', 'match not found');
-    if (!m.locked) {
-      throw new AppError('MATCH_LOCKED', 'picks are secret until lock');
+
+    // Reveal iff the match is locked, or the caller has skin in the game.
+    let revealed: boolean = m.locked;
+    const callerId = req.auth?.userId ?? null;
+    if (!revealed && callerId) {
+      const mine = await pool.query(
+        'SELECT 1 FROM predictions WHERE match_id = $1 AND user_id = $2',
+        [matchId, callerId],
+      );
+      revealed = (mine.rowCount ?? 0) > 0;
+    }
+    if (!revealed) {
+      throw new AppError(
+        'MATCH_LOCKED',
+        'make your call first — the table reveals once you predict (or at kickoff)',
+      );
     }
 
     const result = await pool.query(

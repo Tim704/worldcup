@@ -18,6 +18,7 @@ import healthRouter from './routes/health.js';
 import authRouter from './routes/auth.js';
 import matchesRouter from './routes/matches.js';
 import predictionsRouter from './routes/predictions.js';
+import bracketRouter from './routes/bracket.js';
 import leaderboardRouter from './routes/leaderboard.js';
 import wagersRouter from './routes/wagers.js';
 import adminRouter from './routes/admin.js';
@@ -54,6 +55,7 @@ function buildApp(): express.Express {
   app.use('/api/auth', authRouter);
   app.use('/api/matches', matchesRouter);
   app.use('/api/predictions', predictionsRouter);
+  app.use('/api/bracket', bracketRouter);
   app.use('/api/leaderboard', leaderboardRouter);
   app.use('/api/wagers', wagersRouter);
   app.use('/api/admin', adminRouter);
