@@ -1,9 +1,11 @@
 """World Cup 2026 fixture-ingestion service (Python entrypoint).
 
-Pulls fixtures from an optional upstream HTTP feed (``FIXTURE_FEED_URL``),
-falling back to the bundled :data:`fixtures.SAMPLE_FIXTURES`, and idempotently
-upserts them into the PostgreSQL ``matches`` table defined in
-``backend/migrations/0001_init.sql``.
+Pulls fixtures from the upstream HTTP feed (``FIXTURE_FEED_URL``) and
+idempotently upserts them into the PostgreSQL ``matches`` table defined in
+``backend/migrations/0001_init.sql``. If the feed is missing or unavailable the
+table is left **UNTOUCHED** and an error is logged — the service NEVER seeds
+fake data. The bundled :data:`fixtures.SAMPLE_FIXTURES` load only on an explicit
+``--sample`` run, for local development.
 
 Runtime / safety contract
 -------------------------
@@ -119,18 +121,20 @@ def load_config() -> "dict[str, Any]":
 # Fetch — upstream feed with offline fallback
 # ---------------------------------------------------------------------------
 def fetch_fixtures(feed_url: Optional[str]) -> List[Fixture]:
-    """Return the current fixture list, preferring the upstream feed.
+    """Return the current fixture list from the upstream feed.
 
     Behaviour:
 
-    1. If ``feed_url`` is falsy (not configured), immediately return the bundled
-       :data:`fixtures.SAMPLE_FIXTURES`.
+    1. If ``feed_url`` is falsy (not configured), log an error and return an
+       EMPTY list — we never silently seed fake data.
     2. Otherwise ``GET`` the feed. The response is expected to be JSON: either a
        top-level array of rows, or an object with a ``"fixtures"`` array. Each
        row is normalised via :func:`fixtures.normalize`.
     3. On *any* error (network failure, bad status, malformed JSON, empty list)
-       we log and fall back to :data:`fixtures.SAMPLE_FIXTURES`, so the
-       ingestion loop is resilient and the DB is never left un-seeded.
+       we log an error and return an EMPTY list. The caller upserts nothing, so
+       the ``matches`` table keeps whatever real fixtures it already holds and
+       the next pass simply retries — a feed blip can never replace real data
+       with samples.
 
     Parameters
     ----------
@@ -140,14 +144,15 @@ def fetch_fixtures(feed_url: Optional[str]) -> List[Fixture]:
     Returns
     -------
     List[Fixture]
-        Always non-empty (falls back to the sample set on any problem).
+        The feed's fixtures, or ``[]`` when the feed is unset/unavailable.
     """
     if not feed_url:
-        log.info(
-            "no FIXTURE_FEED_URL configured; using %d bundled sample fixtures",
-            len(fixtures.SAMPLE_FIXTURES),
+        log.error(
+            "FIXTURE_FEED_URL is not configured; leaving the matches table "
+            "untouched (no sample fallback). Set FIXTURE_FEED_URL, or run with "
+            "--sample to deliberately load the bundled samples for local dev.",
         )
-        return list(fixtures.SAMPLE_FIXTURES)
+        return []
 
     # Imported lazily so the module stays importable without `requests`.
     import requests
@@ -191,13 +196,13 @@ def fetch_fixtures(feed_url: Optional[str]) -> List[Fixture]:
         )
         return parsed
 
-    except Exception as exc:  # noqa: BLE001 — deliberately broad: always fall back.
-        log.warning(
-            "feed fetch failed (%s); falling back to %d bundled sample fixtures",
+    except Exception as exc:  # noqa: BLE001 — deliberately broad: never seed fakes.
+        log.error(
+            "feed fetch failed (%s); leaving the matches table untouched "
+            "(no sample fallback) — will retry on the next pass.",
             exc,
-            len(fixtures.SAMPLE_FIXTURES),
         )
-        return list(fixtures.SAMPLE_FIXTURES)
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -293,16 +298,22 @@ def upsert_fixtures(conn: Any, fixtures_to_write: Sequence[Fixture]) -> int:
 # ---------------------------------------------------------------------------
 # One ingestion pass: fetch → connect → upsert → close
 # ---------------------------------------------------------------------------
-def run_once(database_url: str, feed_url: Optional[str]) -> int:
+def run_once(database_url: str, feed_url: Optional[str], use_samples: bool = False) -> int:
     """Perform a single fetch-and-upsert cycle and return the row count.
 
     Opens a fresh psycopg2 connection from ``database_url`` and guarantees it is
-    closed in a ``finally`` block, even on error.
+    closed in a ``finally`` block, even on error. When ``use_samples`` is True
+    (the explicit ``--sample`` dev path) the bundled sample fixtures are written
+    instead of fetching the feed; the normal path NEVER seeds samples.
     """
     # Imported lazily — see module docstring re: keeping import side-effect-free.
     import psycopg2
 
-    current = fetch_fixtures(feed_url)
+    if use_samples:
+        current: List[Fixture] = list(fixtures.SAMPLE_FIXTURES)
+        log.info("seeding %d bundled sample fixtures (--sample)", len(current))
+    else:
+        current = fetch_fixtures(feed_url)
 
     conn = psycopg2.connect(database_url)
     try:
@@ -339,6 +350,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         help="run a single ingestion pass and exit (default: loop forever)",
     )
+    parser.add_argument(
+        "--sample",
+        action="store_true",
+        help=(
+            "deliberately seed the bundled sample fixtures once and exit "
+            "(LOCAL DEVELOPMENT ONLY — the normal feed path never seeds samples)"
+        ),
+    )
     args = parser.parse_args(argv)
 
     config = load_config()
@@ -350,6 +369,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not database_url:
         log.error("DATABASE_URL is not set; cannot connect to PostgreSQL")
         return 1
+
+    if args.sample:
+        # Explicit local-dev seeding of the bundled samples — one pass, exit.
+        run_once(database_url, feed_url, use_samples=True)
+        return 0
 
     if args.once:
         # Single-shot mode: run one pass; let exceptions surface as a non-zero
