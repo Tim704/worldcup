@@ -13,6 +13,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { runMigrations } from './migrate.js';
+import { startLiveScores } from './lib/liveScores.js';
 import { AppError, errorMiddleware } from './error.js';
 import healthRouter from './routes/health.js';
 import authRouter from './routes/auth.js';
@@ -90,6 +91,8 @@ async function main(): Promise<void> {
   const app = buildApp();
   app.listen(port, () => {
     console.log(`[boot] the almanac cup api listening on port ${port}`);
+    // Start the live-score + auto-settlement poller (no-op without a token).
+    startLiveScores();
   });
 }
 

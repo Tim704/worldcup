@@ -93,7 +93,12 @@ export default function MatchCard({ match, hero = false, onSaved }: MatchCardPro
   // -- render -----------------------------------------------------------------
   const mine = saved ?? match.my_prediction;
   const meta = [match.group_label, match.venue].filter(Boolean).join(' · ');
-  const showScore = state === 'final' && match.home_score !== null && match.away_score !== null;
+  // Show the score for finished matches AND live ones (the poller keeps the
+  // running score on the row); upcoming matches show "vs".
+  const showScore =
+    (state === 'final' || state === 'live') &&
+    match.home_score !== null &&
+    match.away_score !== null;
   const homeFlag = flagFor(match.home_team);
   const awayFlag = flagFor(match.away_team);
 

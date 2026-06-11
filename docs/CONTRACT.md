@@ -189,7 +189,8 @@ Tiers exclusive, checked top-down. `sgn` equality means: home-win predicted &
 home won, draw predicted & drawn, away predicted & away won. Season total
 $= \sum P$ over final matches.
 
-**Settlement pipeline** (`POST /api/admin/matches/:id/score`, ONE transaction):
+**Settlement pipeline** (`server/src/lib/settle.ts` → `settleMatch(id, home, away)`,
+ONE transaction):
 1. `UPDATE matches SET home_score=$1, away_score=$2, status='final' WHERE id=$3`.
 2. Fetch all predictions for the match; compute points with the **pure TS
    function** (it is the source of truth, not SQL); write back in ONE statement
@@ -200,6 +201,14 @@ $= \sum P$ over final matches.
 4. Resolve this match's ACCEPTED wagers (§5), batch-updated the same way.
 5. Commit. Re-submitting a corrected score MUST be idempotent: the same
    pipeline re-runs and may flip points and wager outcomes.
+
+`settleMatch` has TWO callers: `POST /api/admin/matches/:id/score` (manual /
+correction) and the **automatic live-score poller** (`server/src/lib/liveScores.ts`).
+The poller (enabled only when `FOOTBALL_DATA_TOKEN` is set, §8) polls
+football-data.org every `LIVE_POLL_SECS`: in-play matches get the running score
++ `status='live'` (display only, no settlement); a FINISHED match is settled
+exactly once via `settleMatch`, then never re-touched (a row already `final` is
+skipped). The admin route remains for corrections.
 
 ---
 
@@ -532,12 +541,18 @@ PORT=8080                                        # server bind port
 APP_SECRET=change-me-please                      # JWT signing secret (HS256)
 ADMIN_USERNAMES=tom                              # comma-separated admin usernames
 VITE_API_BASE=/api                               # frontend build-time API base ('/api' = same-origin nginx proxy)
-FIXTURE_FEED_URL=                                # python ingest (optional)
+FIXTURE_FEED_URL=http://localhost:8091/fixtures  # python ingest feed — REQUIRED (feed-only; no sample fallback)
 INGEST_INTERVAL_SECS=300                         # ingest cadence, SI seconds
+FOOTBALL_DATA_TOKEN=                             # server: enables the live-score + auto-settlement poller (football-data.org); unset = disabled
+LIVE_POLL_SECS=60                                # server: live-score poll cadence, SI seconds (floor 20)
+FD_COMPETITION=WC                                # server: football-data competition code
+FD_EXT_REF_PREFIX=FD-                            # server: ext_ref prefix matching the ingest adapter (FD-<id>)
 ```
 
 `APP_BIND_ADDR` and `RUST_LOG` are RETIRED. The server warns loudly when
-`APP_SECRET` is unset (dev fallback `dev-secret-change-me`).
+`APP_SECRET` is unset (dev fallback `dev-secret-change-me`). The live-score
+poller is OFF unless `FOOTBALL_DATA_TOKEN` is set, so the API runs fine without
+it (e.g. local dev).
 
 ---
 
