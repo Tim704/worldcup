@@ -73,79 +73,12 @@ class Fixture:
 
 
 # ---------------------------------------------------------------------------
-# Sample fixtures — realistic World Cup 2026 group-stage matches
+# No bundled sample fixtures — this service is FEED-ONLY.
 # ---------------------------------------------------------------------------
-# Used as the offline fallback when no FIXTURE_FEED_URL is configured (or when
-# the upstream feed is unreachable). All three co-host nations (United States,
-# Canada, Mexico) and their real candidate venues are represented. Kickoff
-# times are illustrative ISO-8601 UTC instants in the June 2026 tournament
-# window. ext_ref values follow the "WC2026-M<NN>" convention.
-SAMPLE_FIXTURES: List[Fixture] = [
-    Fixture(
-        ext_ref="WC2026-M01",
-        home_team="Mexico",
-        away_team="Poland",
-        group_label="GROUP A",
-        venue="Estadio Azteca, Mexico City",
-        kickoff_at="2026-06-11T19:00:00Z",
-    ),
-    Fixture(
-        ext_ref="WC2026-M02",
-        home_team="Canada",
-        away_team="Croatia",
-        group_label="GROUP B",
-        venue="BMO Field, Toronto",
-        kickoff_at="2026-06-12T22:00:00Z",
-    ),
-    Fixture(
-        ext_ref="WC2026-M03",
-        home_team="United States",
-        away_team="Wales",
-        group_label="GROUP D",
-        venue="SoFi Stadium, Los Angeles",
-        kickoff_at="2026-06-12T01:00:00Z",
-    ),
-    Fixture(
-        ext_ref="WC2026-M04",
-        home_team="Argentina",
-        away_team="Japan",
-        group_label="GROUP C",
-        venue="MetLife Stadium, New York / New Jersey",
-        kickoff_at="2026-06-13T18:00:00Z",
-    ),
-    Fixture(
-        ext_ref="WC2026-M05",
-        home_team="Brazil",
-        away_team="Morocco",
-        group_label="GROUP E",
-        venue="AT&T Stadium, Dallas",
-        kickoff_at="2026-06-13T21:00:00Z",
-    ),
-    Fixture(
-        ext_ref="WC2026-M06",
-        home_team="France",
-        away_team="Senegal",
-        group_label="GROUP F",
-        venue="Levi's Stadium, San Francisco Bay Area",
-        kickoff_at="2026-06-14T19:00:00Z",
-    ),
-    Fixture(
-        ext_ref="WC2026-M07",
-        home_team="England",
-        away_team="Ecuador",
-        group_label="GROUP G",
-        venue="Lumen Field, Seattle",
-        kickoff_at="2026-06-14T23:00:00Z",
-    ),
-    Fixture(
-        ext_ref="WC2026-M08",
-        home_team="Germany",
-        away_team="Australia",
-        group_label="GROUP H",
-        venue="BC Place, Vancouver",
-        kickoff_at="2026-06-15T02:00:00Z",
-    ),
-]
+# Fixtures come EXCLUSIVELY from the upstream feed (FIXTURE_FEED_URL). There is
+# deliberately no offline/sample set: the `matches` table must never contain
+# fabricated data, so when the feed is unavailable the ingest writes nothing
+# rather than inventing matches.
 
 
 # ---------------------------------------------------------------------------

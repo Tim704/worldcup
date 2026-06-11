@@ -4,8 +4,8 @@ Pulls fixtures from the upstream HTTP feed (``FIXTURE_FEED_URL``) and
 idempotently upserts them into the PostgreSQL ``matches`` table defined in
 ``backend/migrations/0001_init.sql``. If the feed is missing or unavailable the
 table is left **UNTOUCHED** and an error is logged — the service NEVER seeds
-fake data. The bundled :data:`fixtures.SAMPLE_FIXTURES` load only on an explicit
-``--sample`` run, for local development.
+fake data. There is no sample/offline fallback whatsoever: fixtures come
+EXCLUSIVELY from the feed.
 
 Runtime / safety contract
 -------------------------
@@ -149,8 +149,7 @@ def fetch_fixtures(feed_url: Optional[str]) -> List[Fixture]:
     if not feed_url:
         log.error(
             "FIXTURE_FEED_URL is not configured; leaving the matches table "
-            "untouched (no sample fallback). Set FIXTURE_FEED_URL, or run with "
-            "--sample to deliberately load the bundled samples for local dev.",
+            "untouched. This service is feed-only — set FIXTURE_FEED_URL.",
         )
         return []
 
@@ -298,22 +297,17 @@ def upsert_fixtures(conn: Any, fixtures_to_write: Sequence[Fixture]) -> int:
 # ---------------------------------------------------------------------------
 # One ingestion pass: fetch → connect → upsert → close
 # ---------------------------------------------------------------------------
-def run_once(database_url: str, feed_url: Optional[str], use_samples: bool = False) -> int:
+def run_once(database_url: str, feed_url: Optional[str]) -> int:
     """Perform a single fetch-and-upsert cycle and return the row count.
 
     Opens a fresh psycopg2 connection from ``database_url`` and guarantees it is
-    closed in a ``finally`` block, even on error. When ``use_samples`` is True
-    (the explicit ``--sample`` dev path) the bundled sample fixtures are written
-    instead of fetching the feed; the normal path NEVER seeds samples.
+    closed in a ``finally`` block, even on error. Feed-only: if the feed is
+    unavailable nothing is written and the table is left untouched.
     """
     # Imported lazily — see module docstring re: keeping import side-effect-free.
     import psycopg2
 
-    if use_samples:
-        current: List[Fixture] = list(fixtures.SAMPLE_FIXTURES)
-        log.info("seeding %d bundled sample fixtures (--sample)", len(current))
-    else:
-        current = fetch_fixtures(feed_url)
+    current = fetch_fixtures(feed_url)
 
     conn = psycopg2.connect(database_url)
     try:
@@ -350,14 +344,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         help="run a single ingestion pass and exit (default: loop forever)",
     )
-    parser.add_argument(
-        "--sample",
-        action="store_true",
-        help=(
-            "deliberately seed the bundled sample fixtures once and exit "
-            "(LOCAL DEVELOPMENT ONLY — the normal feed path never seeds samples)"
-        ),
-    )
     args = parser.parse_args(argv)
 
     config = load_config()
@@ -369,11 +355,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not database_url:
         log.error("DATABASE_URL is not set; cannot connect to PostgreSQL")
         return 1
-
-    if args.sample:
-        # Explicit local-dev seeding of the bundled samples — one pass, exit.
-        run_once(database_url, feed_url, use_samples=True)
-        return 0
 
     if args.once:
         # Single-shot mode: run one pass; let exceptions surface as a non-zero
