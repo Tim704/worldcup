@@ -24,6 +24,7 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../api/client';
 import { displayState, formatKickoff, isLocked } from '../lib/datetime';
+import { flagFor } from '../lib/flags';
 import type { MatchWithMine, Prediction } from '../types/models';
 import PointsBadge from './PointsBadge';
 import ScoreStepper from './ScoreStepper';
@@ -93,6 +94,8 @@ export default function MatchCard({ match, hero = false, onSaved }: MatchCardPro
   const mine = saved ?? match.my_prediction;
   const meta = [match.group_label, match.venue].filter(Boolean).join(' · ');
   const showScore = state === 'final' && match.home_score !== null && match.away_score !== null;
+  const homeFlag = flagFor(match.home_team);
+  const awayFlag = flagFor(match.away_team);
 
   return (
     <article className={`card match-card${hero ? ' card--hero match-card--hero' : ''}`}>
@@ -103,7 +106,14 @@ export default function MatchCard({ match, hero = false, onSaved }: MatchCardPro
       </div>
 
       <div className="match-teams">
-        <span className="team-name">{match.home_team}</span>
+        <span className="team-name">
+          {homeFlag && (
+            <span className="team-name-flag" aria-hidden="true">
+              {homeFlag}{' '}
+            </span>
+          )}
+          {match.home_team}
+        </span>
         {showScore ? (
           <span className="match-score">
             {match.home_score} – {match.away_score}
@@ -111,7 +121,15 @@ export default function MatchCard({ match, hero = false, onSaved }: MatchCardPro
         ) : (
           <span className="match-vs">vs</span>
         )}
-        <span className="team-name team-name--away">{match.away_team}</span>
+        <span className="team-name team-name--away">
+          {match.away_team}
+          {awayFlag && (
+            <span className="team-name-flag" aria-hidden="true">
+              {' '}
+              {awayFlag}
+            </span>
+          )}
+        </span>
       </div>
 
       {/* Editable until lock: stepper pair + save. */}

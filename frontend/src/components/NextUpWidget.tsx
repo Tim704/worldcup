@@ -19,6 +19,7 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../api/client';
 import { formatCountdown, formatKickoff, isLocked } from '../lib/datetime';
+import { flagFor } from '../lib/flags';
 import type { MatchWithMine, Prediction } from '../types/models';
 import ScoreStepper from './ScoreStepper';
 import TableCalls from './TableCalls';
@@ -97,9 +98,24 @@ export default function NextUpWidget({ match, onSaved }: NextUpWidgetProps): JSX
       <span className="kicker">next up</span>
 
       <div className="match-teams">
-        <span className="team-name">{match.home_team}</span>
+        <span className="team-name">
+          {flagFor(match.home_team) && (
+            <span className="team-name-flag" aria-hidden="true">
+              {flagFor(match.home_team)}{' '}
+            </span>
+          )}
+          {match.home_team}
+        </span>
         <span className="match-vs">vs</span>
-        <span className="team-name team-name--away">{match.away_team}</span>
+        <span className="team-name team-name--away">
+          {match.away_team}
+          {flagFor(match.away_team) && (
+            <span className="team-name-flag" aria-hidden="true">
+              {' '}
+              {flagFor(match.away_team)}
+            </span>
+          )}
+        </span>
       </div>
 
       <p className="hint">

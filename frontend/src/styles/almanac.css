@@ -241,8 +241,12 @@ select.input {
 .match-teams { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; }
 .team-name { font-family: 'Fraunces', serif; font-weight: 600; font-size: 20px; line-height: 1.1; }
 .team-name--away { text-align: right; }
+/* Bookend flag beside each name — small, so it reads without crowding. */
+.team-name-flag { font-size: .82em; }
 .match-vs { font-size: 13px; color: var(--muted2); font-weight: 700; }
-.match-score { font-family: 'Fraunces', serif; font-weight: 900; font-size: 34px; letter-spacing: -.02em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Sized to sit IN LINE with the team names (bold weight carries the emphasis,
+ * not a towering size); tabular numerals keep the dash centred. */
+.match-score { font-family: 'Fraunces', serif; font-weight: 900; font-size: 23px; letter-spacing: -.01em; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .match-callline { font-weight: 600; font-size: 14px; font-variant-numeric: tabular-nums; }
 .match-result { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 
@@ -250,7 +254,7 @@ select.input {
  * bolder presence (still 1.5px ink border + 6px shadow). */
 .card--hero { background: var(--hero); }
 .match-card--hero .team-name { font-size: 26px; }
-.match-card--hero .match-score { font-size: 44px; }
+.match-card--hero .match-score { font-size: 29px; }
 .mainevent { display: grid; gap: 8px; }
 
 /* ---------------------------------------------------------------------------
