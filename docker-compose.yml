@@ -24,8 +24,11 @@ services:
   # ---------------------------------------------------------------------------
   # db — PostgreSQL 16 (the single source of truth for all services).
   # ---------------------------------------------------------------------------
+  # Pinned to 17 (not 16) to match the Pi's host PostgreSQL 17: the one-time
+  # production data migration is a `pg_dump` from host PG17 → `pg_restore`
+  # into this container, and restoring a v17 dump into a v16 server fails.
   db:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     platform: linux/arm64
     restart: unless-stopped
     # Credentials are fixed per the role brief / CONTRACT §8 DATABASE_URL
